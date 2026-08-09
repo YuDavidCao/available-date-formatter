@@ -6,7 +6,13 @@ type Row = { kind: 'label'; text: string } | { kind: 'day'; group: DayGroup; bus
 const SCALE = 2
 const PAD = 32
 const ROW = 34
-const WIDTH = 620
+const WIDTH = 680
+
+const PAPER = '#fbfaf8'
+const INK = '#16181c'
+const SOFT = '#6e7278'
+const RULE = '#e7e4de'
+const MARK = '#2b44d0'
 
 /** Renders availability to a PNG blob on a canvas — no DOM screenshotting library needed. */
 export async function toPng(
@@ -30,20 +36,21 @@ export async function toPng(
   if (!ctx) throw new Error('canvas unavailable')
   ctx.scale(SCALE, SCALE)
 
-  ctx.fillStyle = '#0b1120'
+  ctx.fillStyle = PAPER
   ctx.fillRect(0, 0, WIDTH, height)
-  ctx.fillStyle = '#1e293b'
-  ctx.fillRect(0, 0, 4, height)
+  ctx.fillStyle = MARK
+  ctx.fillRect(0, 0, 3, height)
 
-  const font = (size: number, weight = '400') =>
-    `${weight} ${size}px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif`
+  const serif = (size: number) => `${size}px Newsreader, ui-serif, Georgia, serif`
+  const mono = (size: number, weight = '400') =>
+    `${weight} ${size}px "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace`
 
-  ctx.fillStyle = '#f8fafc'
-  ctx.font = font(22, '600')
+  ctx.fillStyle = INK
+  ctx.font = serif(23)
   ctx.fillText('My availability', PAD, 44)
 
-  ctx.fillStyle = '#94a3b8'
-  ctx.font = font(13)
+  ctx.fillStyle = SOFT
+  ctx.font = mono(12)
   const anchor = groups[0] ?? busyGroups[0]
   const zone = anchor ? `${o.tz} · ${tzAbbr(anchor.ranges[0].s, o.tz)}` : o.tz
   ctx.fillText(zone, PAD, 66)
@@ -51,18 +58,19 @@ export async function toPng(
   rows.forEach((row, i) => {
     const y = header + i * ROW
     if (row.kind === 'label') {
-      ctx.fillStyle = '#94a3b8'
-      ctx.font = font(12, '600')
+      ctx.fillStyle = SOFT
+      ctx.font = mono(10, '500')
       ctx.fillText(row.text.toUpperCase(), PAD, y + 4)
       return
     }
-    ctx.fillStyle = i % 2 ? '#0f172a' : '#111c31'
-    ctx.fillRect(PAD - 12, y - 18, WIDTH - 2 * PAD + 24, ROW - 6)
-    ctx.fillStyle = '#e2e8f0'
-    ctx.font = font(15, '600')
+    // A hairline per row instead of banding — the same rules the on-screen grid uses.
+    ctx.fillStyle = RULE
+    ctx.fillRect(PAD, y + 10, WIDTH - 2 * PAD, 1)
+    ctx.fillStyle = INK
+    ctx.font = serif(16)
     ctx.fillText(formatDay(row.group.day, o), PAD, y + 4)
-    ctx.fillStyle = row.busy ? '#fda4af' : '#7dd3fc'
-    ctx.font = font(15)
+    ctx.fillStyle = row.busy ? SOFT : MARK
+    ctx.font = mono(13)
     ctx.fillText(row.group.ranges.map((r) => formatRange(r, o)).join('   ·   '), PAD + 190, y + 4)
   })
 

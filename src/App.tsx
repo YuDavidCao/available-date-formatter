@@ -2,14 +2,32 @@ import { useEffect, useMemo, useState } from 'react'
 import { WeekGrid, type Mode, type Selection } from './components/WeekGrid'
 import { copyImage, copyText, download, toPng } from './lib/export'
 import { FORMAT_LABELS, render, toIcs, type FormatId, type FormatOptions } from './lib/format'
-import { DAY_NAMES, localTz, today, tzList, weekStart, type Slot } from './lib/time'
+import { DAY_NAMES, dayDate, localTz, today, tzList, weekStart, type Slot } from './lib/time'
 import { decodeState, encodeState, shareUrl } from './lib/url'
 
 const FORMAT_IDS = Object.keys(FORMAT_LABELS) as FormatId[]
 const ZONES = tzList()
 const HISTORY_MAX = 50
+/** Formats that are tables or lists rather than prose, and need aligned type. */
+const STRUCTURED = new Set<FormatId>(['markdown', 'poll'])
 
 const initial = decodeState(window.location.hash.slice(1))
+
+const monthDay = (day: number) =>
+  new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(dayDate(day))
+
+function weekSpan(days: number[]): string {
+  const [first, last] = [days[0], days[days.length - 1]]
+  const sameMonth = dayDate(first).getUTCMonth() === dayDate(last).getUTCMonth()
+  return `${monthDay(first)} – ${sameMonth ? dayDate(last).getUTCDate() : monthDay(last)}`
+}
+
+function duration(list: Slot[]): string {
+  const minutes = list.reduce((total, slot) => total + (slot.e - slot.s) / 60_000, 0)
+  const hours = Math.floor(minutes / 60)
+  const rest = Math.round(minutes % 60)
+  return [hours && `${hours}h`, rest && `${rest}m`].filter(Boolean).join(' ') || '0m'
+}
 
 export default function App() {
   const [tz, setTz] = useState(initial?.tz ?? localTz())
@@ -35,6 +53,7 @@ export default function App() {
   }, [tz, offset, startDow])
 
   const text = render(slots, format, options, busy)
+  const empty = slots.length === 0 && busy.length === 0
 
   useEffect(() => {
     const hash = encodeState(slots, tz, busy)
@@ -73,71 +92,49 @@ export default function App() {
   })
 
   const guard = (action: () => void | Promise<void>) => async () => {
-    if (slots.length === 0 && busy.length === 0) return flash('Pick some times first')
+    if (empty) return flash('Pick some times first')
     await action()
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-6 py-8">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Available Date Formatter</h1>
-          <p className="text-sm text-slate-400">Drag across the calendar to mark when you're free — or switch to Unavailable to block time off — then copy it however you need it.</p>
+    <div className="mx-auto w-full max-w-[58rem] px-5 py-12 sm:px-8 sm:py-16">
+      <header className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-3 border-b border-rule pb-4">
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <h1 className="font-serif text-[27px] leading-none">Availability</h1>
+          <p className="font-mono text-[11px] text-soft">Drag the grid, copy the message.</p>
         </div>
-        <label className="flex items-center gap-2 text-sm">
-          <span className="text-slate-400">Timezone</span>
-          <select
-            value={tz}
-            onChange={(e) => setTz(e.target.value)}
-            className="max-w-64 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-sky-500"
-          >
+        <label className="flex items-baseline gap-2 font-mono text-[11px] text-soft">
+          <span>Your timezone</span>
+          <Select value={tz} onChange={setTz} className="max-w-52">
             {ZONES.map((zone) => (
               <option key={zone} value={zone}>
                 {zone}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
       </header>
 
-      <section className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <NavButton onClick={() => setOffset(offset - 1)}>←</NavButton>
-            <NavButton onClick={() => setOffset(0)}>This week</NavButton>
-            <NavButton onClick={() => setOffset(offset + 1)}>→</NavButton>
-            <label className="flex items-center gap-2 text-sm text-slate-400">
-              <span>Week starts</span>
-              <select
-                value={startDow}
-                onChange={(e) => setStartDow(Number(e.target.value))}
-                className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm text-slate-200 outline-none focus:border-sky-500"
-              >
-                {DAY_NAMES.map((name, dow) => (
-                  <option key={name} value={dow}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
+      <section className="mt-10">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+          <div className="flex items-center gap-1">
+            <Step label="Previous week" onClick={() => setOffset(offset - 1)}>
+              ←
+            </Step>
+            <span className="min-w-32 text-center font-mono text-[13px] text-ink">{weekSpan(days)}</span>
+            <Step label="Next week" onClick={() => setOffset(offset + 1)}>
+              →
+            </Step>
+            {offset !== 0 && (
+              <Quiet onClick={() => setOffset(0)}>
+                Today
+              </Quiet>
+            )}
           </div>
-          <div className="flex items-center gap-2 text-sm text-slate-400">
-            <div className="flex overflow-hidden rounded-lg border border-slate-700">
-              <ModeButton active={mode === 'available'} onClick={() => setMode('available')} tone="sky">
-                Available
-              </ModeButton>
-              <ModeButton active={mode === 'busy'} onClick={() => setMode('busy')} tone="rose">
-                Unavailable
-              </ModeButton>
-            </div>
-            <span>
-              {slots.length} free
-              {busy.length > 0 && ` · ${busy.length} busy`}
-            </span>
-            <NavButton disabled={history.length === 0} onClick={undo}>
-              Undo
-            </NavButton>
-            <NavButton onClick={() => apply({ slots: [], busy: [] })}>Clear all</NavButton>
+
+          <div className="flex items-center gap-5">
+            <Paint active={mode === 'available'} onClick={() => setMode('available')} label="Available" />
+            <Paint active={mode === 'busy'} onClick={() => setMode('busy')} label="Unavailable" busy />
           </div>
         </div>
 
@@ -150,84 +147,136 @@ export default function App() {
           hour12={hour12}
           onChange={apply}
         />
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 font-mono text-[11px] text-soft">
+          <p>
+            {empty
+              ? 'Nothing marked yet'
+              : `${duration(slots)} free${busy.length ? ` · ${duration(busy)} blocked` : ''}`}
+          </p>
+          <div className="flex items-center gap-4">
+            <Quiet onClick={undo} disabled={history.length === 0}>
+              Undo
+            </Quiet>
+            <Quiet onClick={() => apply({ slots: [], busy: [] })} disabled={empty}>
+              Clear all
+            </Quiet>
+          </div>
+        </div>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-[1fr_320px]">
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap gap-2">
-            {FORMAT_IDS.map((id) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setFormat(id)}
-                className={`rounded-full px-3 py-1.5 text-sm transition-colors ${
-                  format === id
-                    ? 'bg-sky-500 text-slate-950 font-medium'
-                    : 'bg-slate-800/70 text-slate-300 hover:bg-slate-700'
-                }`}
-              >
-                {FORMAT_LABELS[id]}
-              </button>
-            ))}
-          </div>
-
-          <pre className="min-h-40 overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/60 p-4 text-sm whitespace-pre-wrap text-slate-200">
-            {text || 'Nothing selected yet — drag across the calendar above.'}
-          </pre>
+      <section className="mt-14">
+        <div className="mb-6 flex flex-wrap gap-x-5 gap-y-2 border-b border-rule pb-2.5">
+          {FORMAT_IDS.map((id) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={format === id}
+              onClick={() => setFormat(id)}
+              className={`-mb-[11px] border-b pb-2.5 text-[13px] transition-colors ${
+                format === id
+                  ? 'border-mark font-medium text-ink'
+                  : 'border-transparent text-soft hover:text-ink'
+              }`}
+            >
+              {FORMAT_LABELS[id]}
+            </button>
+          ))}
         </div>
 
-        <div className="flex flex-col gap-4">
-          <fieldset className="flex flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
-            <legend className="px-1 text-xs tracking-wide text-slate-400 uppercase">Text options</legend>
-            <Toggle checked={hour12} onChange={setHour12} label="12-hour clock" />
-            <Toggle checked={showTz} onChange={setShowTz} label="Include timezone" />
-            <Toggle checked={relativeDays} onChange={setRelativeDays} label='Use "Today" / "Tomorrow"' />
-            <Toggle checked={longDates} onChange={setLongDates} label="Long day names" />
-            <label className="mt-1 flex flex-col gap-1 text-sm text-slate-300">
-              <span>Also show in their timezone</span>
-              <select
-                value={theirTz}
-                onChange={(e) => setTheirTz(e.target.value)}
-                className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm outline-none focus:border-sky-500"
-              >
-                <option value="">Off</option>
-                {ZONES.map((zone) => (
-                  <option key={zone} value={zone}>
-                    {zone}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </fieldset>
+        <div className="border-l-2 border-mark pl-5 sm:pl-7">
+          {empty ? (
+            <p className="font-serif text-[19px] text-soft italic">
+              Your message will appear here as you mark times.
+            </p>
+          ) : (
+            <pre
+              className={`overflow-x-auto whitespace-pre-wrap ${
+                STRUCTURED.has(format)
+                  ? 'font-mono text-[13px] leading-[1.8]'
+                  : 'font-serif text-[19px] leading-[1.65]'
+              }`}
+            >
+              {text}
+            </pre>
+          )}
+        </div>
 
-          <div className="flex flex-col gap-2">
-            <Action primary onClick={guard(async () => { await copyText(text); flash('Text copied') })}>
-              Copy text
-            </Action>
-            <Action
+        <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-4">
+          <button
+            type="button"
+            onClick={guard(async () => {
+              await copyText(text)
+              flash('Text copied')
+            })}
+            className="bg-ink px-6 py-2.5 text-[13px] font-medium text-paper transition-colors hover:bg-mark"
+          >
+            Copy text
+          </button>
+          <div className="flex items-center gap-3 font-mono text-[12px] text-soft">
+            <Quiet
               onClick={guard(async () => {
                 const how = await copyImage(toPng(slots, options, busy), 'availability.png')
-                flash(how === 'copied' ? 'PNG copied' : 'PNG downloaded')
+                flash(how === 'copied' ? 'Image copied' : 'Image downloaded')
               })}
             >
-              Copy as PNG
-            </Action>
-            <Action onClick={guard(async () => { await copyText(shareUrl(slots, tz, busy)); flash('Share link copied') })}>
-              Copy share link
-            </Action>
-            <Action onClick={guard(() => download(toIcs(slots, busy), 'availability.ics', 'text/calendar'))}>
+              Copy image
+            </Quiet>
+            <span aria-hidden>·</span>
+            <Quiet
+              onClick={guard(async () => {
+                await copyText(shareUrl(slots, tz, busy))
+                flash('Link copied')
+              })}
+            >
+              Copy link
+            </Quiet>
+            <span aria-hidden>·</span>
+            <Quiet onClick={guard(() => download(toIcs(slots, busy), 'availability.ics', 'text/calendar'))}>
               Download .ics
-            </Action>
+            </Quiet>
           </div>
-
-          <p className="text-xs text-slate-500">
-            Share links encode the times in the URL itself — nothing is uploaded anywhere.
-          </p>
         </div>
+      </section>
+
+      <section className="mt-14 border-t border-rule pt-6">
+        <div className="flex flex-wrap items-baseline gap-x-8 gap-y-4">
+          <Check checked={hour12} onChange={setHour12} label="12-hour clock" />
+          <Check checked={showTz} onChange={setShowTz} label="Name the timezone" />
+          <Check checked={relativeDays} onChange={setRelativeDays} label="Today / Tomorrow" />
+          <Check checked={longDates} onChange={setLongDates} label="Full day names" />
+          <label className="flex items-baseline gap-2 font-mono text-[11px] text-soft">
+            <span>Week starts</span>
+            <Select value={String(startDow)} onChange={(v) => setStartDow(Number(v))}>
+              {DAY_NAMES.map((name, dow) => (
+                <option key={name} value={dow}>
+                  {name}
+                </option>
+              ))}
+            </Select>
+          </label>
+          <label className="flex items-baseline gap-2 font-mono text-[11px] text-soft">
+            <span>Also show in</span>
+            <Select value={theirTz} onChange={setTheirTz} className="max-w-52">
+              <option value="">Off</option>
+              {ZONES.map((zone) => (
+                <option key={zone} value={zone}>
+                  {zone}
+                </option>
+              ))}
+            </Select>
+          </label>
+        </div>
+        <p className="mt-6 font-mono text-[11px] text-soft">
+          Times live in the link itself. Nothing is uploaded.
+        </p>
       </section>
 
       {toast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 rounded-full bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 shadow-lg">
+        <div
+          role="status"
+          className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-ink px-4 py-2 font-mono text-[12px] text-paper"
+        >
           {toast}
         </div>
       )}
@@ -235,7 +284,72 @@ export default function App() {
   )
 }
 
-function NavButton({
+function Select({
+  value,
+  onChange,
+  children,
+  className = '',
+}: {
+  value: string
+  onChange: (value: string) => void
+  children: React.ReactNode
+  className?: string
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={`border-b border-rule bg-transparent pb-0.5 font-mono text-[12px] text-ink transition-colors hover:border-ink focus:border-mark focus:outline-none ${className}`}
+    >
+      {children}
+    </select>
+  )
+}
+
+function Step({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onClick}
+      className="px-2 py-1 font-mono text-[13px] text-soft transition-colors hover:text-ink"
+    >
+      {children}
+    </button>
+  )
+}
+
+/** The swatch shows what this brush paints, so the grid needs no separate legend. */
+function Paint({
+  active,
+  onClick,
+  label,
+  busy,
+}: {
+  active: boolean
+  onClick: () => void
+  label: string
+  busy?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={`flex items-center gap-2 border-b pb-1 text-[13px] transition-colors ${
+        active ? 'border-ink text-ink' : 'border-transparent text-soft hover:text-ink'
+      }`}
+    >
+      <span
+        aria-hidden
+        className={`h-3.5 w-3.5 border-l-2 ${busy ? 'hatched border-ink/30' : 'border-mark bg-mark/10'}`}
+      />
+      {label}
+    </button>
+  )
+}
+
+function Quiet({
   children,
   onClick,
   disabled,
@@ -249,61 +363,29 @@ function NavButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 transition-colors hover:border-slate-500 hover:text-white disabled:pointer-events-none disabled:opacity-40"
+      className="font-mono text-[12px] text-soft underline decoration-rule underline-offset-4 transition-colors hover:text-ink hover:decoration-mark disabled:pointer-events-none disabled:opacity-40"
     >
       {children}
     </button>
   )
 }
 
-function ModeButton({
-  children,
-  active,
-  onClick,
-  tone,
+function Check({
+  checked,
+  onChange,
+  label,
 }: {
-  children: React.ReactNode
-  active: boolean
-  onClick: () => void
-  tone: 'sky' | 'rose'
+  checked: boolean
+  onChange: (value: boolean) => void
+  label: string
 }) {
-  const on = tone === 'sky' ? 'bg-sky-500 text-slate-950' : 'bg-rose-500 text-slate-950'
   return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={`px-3 py-1.5 text-sm font-medium transition-colors ${
-        active ? on : 'text-slate-300 hover:bg-slate-800'
-      }`}
-    >
-      {children}
-    </button>
-  )
-}
-
-function Action({ children, onClick, primary }: { children: React.ReactNode; onClick: () => void; primary?: boolean }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-xl px-4 py-2.5 text-sm font-medium transition-colors ${
-        primary ? 'bg-sky-500 text-slate-950 hover:bg-sky-400' : 'border border-slate-700 text-slate-200 hover:border-slate-500'
-      }`}
-    >
-      {children}
-    </button>
-  )
-}
-
-function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
-  return (
-    <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+    <label className="flex cursor-pointer items-center gap-2 text-[13px] text-ink">
       <input
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        className="h-4 w-4 accent-sky-500"
+        className="h-3.5 w-3.5 accent-mark"
       />
       {label}
     </label>

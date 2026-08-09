@@ -3,9 +3,10 @@ import { groupByDay } from '../lib/format'
 import { dayDate, normalize, subtract, today, utcToMinutes, wallToUtc, type Slot } from '../lib/time'
 
 const SNAP_MIN = 15
-const HOUR_PX = 48
+const HOUR_PX = 46
 const DAY_MIN = 1440
 const PX_PER_MIN = HOUR_PX / 60
+const LABEL_MIN_PX = 30
 
 type Drag = { day: number; anchor: number; cursor: number }
 
@@ -28,9 +29,9 @@ function snap(minutes: number): number {
 }
 
 function hourLabel(hour: number, hour12: boolean): string {
-  if (!hour12) return `${String(hour).padStart(2, '0')}:00`
-  const h = hour % 12 === 0 ? 12 : hour % 12
-  return `${h} ${hour < 12 ? 'AM' : 'PM'}`
+  if (!hour12) return `${String(hour).padStart(2, '0')}`
+  if (hour === 12) return 'noon'
+  return `${hour % 12}${hour < 12 ? 'am' : 'pm'}`
 }
 
 export function WeekGrid({ days, slots, busy, mode, tz, hour12, onChange }: Props) {
@@ -54,6 +55,14 @@ export function WeekGrid({ days, slots, busy, mode, tz, hour12, onChange }: Prop
     for (const group of groupByDay(busy, tz)) map.set(group.day, group.ranges)
     return map
   }, [busy, tz])
+
+  /** Compact clock for the label inside a block: "9am", "9:30am". */
+  const clock = (ms: number) =>
+    new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit', hour12 })
+      .format(ms)
+      .replace(':00', '')
+      .replace(' ', '')
+      .toLowerCase()
 
   const pointToCell = (e: React.PointerEvent | PointerEvent) => {
     const body = bodyRef.current
@@ -102,37 +111,41 @@ export function WeekGrid({ days, slots, busy, mode, tz, hour12, onChange }: Prop
   const now = today(tz)
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/50">
-      <div className="flex border-b border-slate-800 bg-slate-900/80">
-        <div className="w-16 shrink-0" />
+    <div>
+      <div className="flex border-b border-rule">
+        <div className="w-12 shrink-0" />
         {days.map((day) => {
           const date = dayDate(day)
+          const isToday = day === now
           return (
-            <div
-              key={day}
-              className={`flex-1 py-2 text-center ${day === now ? 'text-sky-400' : 'text-slate-300'}`}
-            >
-              <div className="text-[11px] font-medium tracking-wide uppercase">
+            <div key={day} className="flex-1 pb-2.5 text-center">
+              <div
+                className={`font-mono text-[10px] tracking-[0.14em] uppercase ${
+                  isToday ? 'text-mark' : 'text-soft'
+                }`}
+              >
                 {new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'UTC' }).format(date)}
               </div>
-              <div className="text-sm font-semibold">
-                {new Intl.DateTimeFormat('en-US', { month: 'numeric', day: 'numeric', timeZone: 'UTC' }).format(date)}
+              <div className={`font-mono text-[15px] ${isToday ? 'text-mark' : 'text-ink'}`}>
+                {new Intl.DateTimeFormat('en-US', { day: 'numeric', timeZone: 'UTC' }).format(date)}
               </div>
             </div>
           )
         })}
       </div>
 
-      <div ref={scrollRef} className="h-[420px] overflow-y-auto">
+      <div ref={scrollRef} className="h-[400px] overflow-y-auto">
         <div className="flex">
-          <div className="w-16 shrink-0 select-none">
+          <div className="w-12 shrink-0 select-none">
             {Array.from({ length: 24 }, (_, hour) => (
               <div
                 key={hour}
-                className="relative text-right text-[11px] text-slate-500"
+                className="relative text-right font-mono text-[10px] text-soft"
                 style={{ height: HOUR_PX }}
               >
-                <span className="absolute -top-1.5 right-2">{hour ? hourLabel(hour, hour12) : ''}</span>
+                <span className="absolute -top-1.5 right-2.5">
+                  {hour ? hourLabel(hour, hour12) : ''}
+                </span>
               </div>
             ))}
           </div>
@@ -149,33 +162,42 @@ export function WeekGrid({ days, slots, busy, mode, tz, hour12, onChange }: Prop
             {Array.from({ length: 24 }, (_, hour) => (
               <div
                 key={hour}
-                className="pointer-events-none absolute inset-x-0 border-t border-slate-800/70"
+                className="pointer-events-none absolute inset-x-0 border-t border-rule"
                 style={{ top: hour * HOUR_PX }}
               />
             ))}
 
             <div className="absolute inset-0 flex">
               {days.map((day) => (
-                <div key={day} className="relative flex-1 border-l border-slate-800/70">
+                <div key={day} className="relative flex-1 border-l border-rule">
                   {[
                     { ranges: byDay.get(day) ?? [], busy: false },
                     { ranges: busyByDay.get(day) ?? [], busy: true },
                   ].flatMap(({ ranges, busy: isBusy }) =>
                     ranges.map((range) => {
                       const top = utcToMinutes(range.s, day, tz) * PX_PER_MIN
-                      const height = (utcToMinutes(range.e, day, tz) - utcToMinutes(range.s, day, tz)) * PX_PER_MIN
-                      const style = isBusy
-                        ? 'bg-rose-500/25 ring-rose-400/60 hover:bg-rose-500/35'
-                        : 'bg-sky-500/25 ring-sky-400/60 hover:bg-sky-500/35'
+                      const height =
+                        (utcToMinutes(range.e, day, tz) - utcToMinutes(range.s, day, tz)) * PX_PER_MIN
                       return (
                         <div
                           key={`${isBusy}-${range.s}`}
-                          className={`group absolute inset-x-1 overflow-hidden rounded-lg ring-1 transition-colors ${style}`}
+                          className={`group absolute inset-x-0 overflow-hidden border-l-2 ${
+                            isBusy ? 'hatched border-ink/30' : 'border-mark bg-mark/10'
+                          }`}
                           style={{ top, height }}
                         >
+                          {height >= LABEL_MIN_PX && (
+                            <span
+                              className={`pointer-events-none block px-1.5 pt-1 font-mono text-[10px] leading-tight ${
+                                isBusy ? 'text-soft' : 'text-mark'
+                              }`}
+                            >
+                              {clock(range.s)}–{clock(range.e)}
+                            </span>
+                          )}
                           <button
                             type="button"
-                            aria-label={isBusy ? 'Remove this unavailable block' : 'Remove this time block'}
+                            aria-label={`Remove ${isBusy ? 'unavailable' : 'available'} block ${clock(range.s)} to ${clock(range.e)}`}
                             onPointerDown={(e) => e.stopPropagation()}
                             onClick={() =>
                               onChange(
@@ -184,7 +206,7 @@ export function WeekGrid({ days, slots, busy, mode, tz, hour12, onChange }: Prop
                                   : { slots: subtract(slots, range), busy },
                               )
                             }
-                            className="absolute top-0.5 right-0.5 flex h-5 w-5 items-center justify-center rounded text-xs text-slate-100 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-slate-100/20 focus:opacity-100"
+                            className="absolute top-0 right-0 flex h-5 w-5 items-center justify-center bg-paper/80 font-mono text-[13px] text-soft opacity-0 transition-opacity group-hover:opacity-100 hover:text-ink focus:opacity-100"
                           >
                             ×
                           </button>
@@ -195,12 +217,14 @@ export function WeekGrid({ days, slots, busy, mode, tz, hour12, onChange }: Prop
 
                   {preview?.day === day && (
                     <div
-                      className={`pointer-events-none absolute inset-x-1 rounded-lg ${
-                        mode === 'busy' ? 'bg-rose-400/40 ring-2 ring-rose-300' : 'bg-sky-400/40 ring-2 ring-sky-300'
+                      className={`pointer-events-none absolute inset-x-0 border-l-2 ${
+                        mode === 'busy' ? 'hatched border-ink/40' : 'border-mark bg-mark/20'
                       }`}
                       style={{ top: preview.top, height: preview.height }}
                     >
-                      <span className="px-1.5 text-[11px] font-medium text-white">{preview.label}</span>
+                      <span className="block px-1.5 pt-1 font-mono text-[10px] text-ink">
+                        {preview.label}
+                      </span>
                     </div>
                   )}
                 </div>

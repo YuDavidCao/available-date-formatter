@@ -1,5 +1,43 @@
 @import "tailwindcss";
 
-body {
-  @apply min-h-screen bg-slate-950 text-slate-100 antialiased;
+@theme {
+  --color-paper: #fbfaf8;
+  --color-ink: #16181c;
+  --color-soft: #6e7278;
+  --color-rule: #e7e4de;
+  --color-mark: #2b44d0;
+
+  --font-sans: "Archivo", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Newsreader", ui-serif, Georgia, serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  body {
+    @apply min-h-screen bg-paper font-sans text-ink antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-mark);
+    outline-offset: 2px;
+  }
+}
+
+/* Unavailable is struck out rather than colored, the way a paper timetable does it. */
+.hatched {
+  background-color: rgba(22, 24, 28, 0.03);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(22, 24, 28, 0.24) 0 1px,
+    transparent 1px 6px
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
