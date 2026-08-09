@@ -10,7 +10,6 @@ const options: FormatOptions = {
   showTz: false,
   relativeDays: false,
   longDates: false,
-  startDow: 1,
 }
 
 // 2026-08-11 (a Tuesday) 09:00–11:00 and 14:00–15:30 in New York.
@@ -73,18 +72,20 @@ test('grouping splits a block that crosses midnight in the display zone', () => 
   expect(groupByDay(overnight, NY).map((g) => g.day)).toEqual([day, day + 1])
 })
 
-test('output starts on the chosen week start day', () => {
-  // Mon 2026-08-10 through Thu 2026-08-13, one hour each.
-  const week: Slot[] = [0, 1, 2, 3].map((i) => ({
+test('output stays in date order, including across weeks', () => {
+  // Mon 2026-08-10 through Thu 2026-08-13, plus the Monday after — one hour each.
+  const days: Slot[] = [0, 1, 2, 3, 7].map((i) => ({
     s: wallToUtc(day - 1 + i, 9 * 60, NY),
     e: wallToUtc(day - 1 + i, 10 * 60, NY),
   }))
-  const firstLine = (startDow: number) => render(week, 'plain', { ...options, startDow }).split('\n')[0]
-
-  expect(firstLine(1)).toContain('Mon')
-  expect(firstLine(3)).toContain('Wed')
-  expect(render(week, 'plain', { ...options, startDow: 3 }).split('\n').map((l) => l.slice(0, 3)))
-    .toEqual(['Wed', 'Thu', 'Mon', 'Tue'])
+  // Ordering by weekday instead of date used to print Aug 17 above Aug 11.
+  expect(render(days, 'plain', options).split('\n')).toEqual([
+    'Mon, Aug 10 — 9–10 AM',
+    'Tue, Aug 11 — 9–10 AM',
+    'Wed, Aug 12 — 9–10 AM',
+    'Thu, Aug 13 — 9–10 AM',
+    'Mon, Aug 17 — 9–10 AM',
+  ])
 })
 
 test('email format drops the redundant meridiem inside a range', () => {

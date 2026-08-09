@@ -24,7 +24,7 @@ export default function App() {
   const [startDow, setStartDow] = useState(1)
   const [toast, setToast] = useState('')
 
-  const options: FormatOptions = { tz, hour12, showTz, relativeDays, longDates, startDow }
+  const options: FormatOptions = { tz, hour12, showTz, relativeDays, longDates }
 
   const days = useMemo(() => {
     const start = weekStart(today(tz), startDow) + offset * 7

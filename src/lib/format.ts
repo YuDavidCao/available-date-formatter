@@ -1,4 +1,4 @@
-import { DAY_MS, dayDate, dayOfWeek, epochDayIn, tzAbbr, wallToUtc, type Slot } from './time'
+import { DAY_MS, dayDate, epochDayIn, tzAbbr, wallToUtc, type Slot } from './time'
 
 export type FormatId = 'email' | 'bullets' | 'compact' | 'markdown' | 'plain' | 'poll'
 
@@ -8,17 +8,16 @@ export type FormatOptions = {
   showTz: boolean
   relativeDays: boolean
   longDates: boolean
-  startDow: number
 }
 
 export type DayGroup = { day: number; ranges: Slot[] }
 
 /**
- * Split slots at midnight in `tz` and bucket them per civil day.
- * With `startDow`, days are ordered by weekday cycling from that day (Wednesday first, etc.);
- * otherwise chronologically.
+ * Split slots at midnight in `tz` and bucket them per civil day, chronologically.
+ * A single grid week already runs from the chosen start day, so date order
+ * reproduces it; across weeks, only date order stays truthful.
  */
-export function groupByDay(slots: readonly Slot[], tz: string, startDow?: number): DayGroup[] {
+export function groupByDay(slots: readonly Slot[], tz: string): DayGroup[] {
   const buckets = new Map<number, Slot[]>()
   for (const slot of slots) {
     let cursor = slot.s
@@ -30,9 +29,8 @@ export function groupByDay(slots: readonly Slot[], tz: string, startDow?: number
     }
   }
 
-  const rank = (day: number) => (startDow === undefined ? 0 : dayOfWeek(day, startDow))
   return [...buckets.entries()]
-    .sort((a, b) => rank(a[0]) - rank(b[0]) || a[0] - b[0])
+    .sort((a, b) => a[0] - b[0])
     .map(([day, ranges]) => ({ day, ranges }))
 }
 
@@ -104,10 +102,9 @@ function sentenceList(groups: DayGroup[], o: FormatOptions): string {
   return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
 }
 
-/** Days appearing in either half, in the same week order the two halves use. */
-function mergedDays({ free, busy }: Doc, o: FormatOptions): number[] {
-  const days = [...new Set([...free, ...busy].map((g) => g.day))]
-  return days.sort((a, b) => dayOfWeek(a, o.startDow) - dayOfWeek(b, o.startDow) || a - b)
+/** Days appearing in either half, in the same order the two halves use. */
+function mergedDays({ free, busy }: Doc): number[] {
+  return [...new Set([...free, ...busy].map((g) => g.day))].sort((a, b) => a - b)
 }
 
 /** Available lines, then the busy ones under their own heading. */
@@ -156,7 +153,7 @@ const RENDERERS: Record<FormatId, (d: Doc, o: FormatOptions) => string> = {
     return [
       busy.length ? `| Day | Available${zone} | Can't do |` : `| Day | Available${zone} |`,
       busy.length ? '| --- | --- | --- |' : '| --- | --- |',
-      ...mergedDays(doc, o).map((day) =>
+      ...mergedDays(doc).map((day) =>
         busy.length
           ? `| ${formatDay(day, o)} | ${cellsFor(free, day)} | ${cellsFor(busy, day)} |`
           : `| ${formatDay(day, o)} | ${cellsFor(free, day)} |`,
@@ -188,8 +185,8 @@ export function render(
   busy: readonly Slot[] = [],
 ): string {
   const doc: Doc = {
-    free: groupByDay(slots, o.tz, o.startDow),
-    busy: groupByDay(busy, o.tz, o.startDow),
+    free: groupByDay(slots, o.tz),
+    busy: groupByDay(busy, o.tz),
   }
   if (doc.free.length === 0 && doc.busy.length === 0) return ''
   return RENDERERS[format](doc, o)

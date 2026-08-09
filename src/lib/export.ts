@@ -14,8 +14,8 @@ export async function toPng(
   o: FormatOptions,
   busy: readonly Slot[] = [],
 ): Promise<Blob> {
-  const groups = groupByDay(slots, o.tz, o.startDow)
-  const busyGroups = groupByDay(busy, o.tz, o.startDow)
+  const groups = groupByDay(slots, o.tz)
+  const busyGroups = groupByDay(busy, o.tz)
   const rows: Row[] = [
     ...groups.map((group): Row => ({ kind: 'day', group, busy: false })),
     ...(busyGroups.length ? [{ kind: 'label', text: 'Not available' } as Row] : []),
