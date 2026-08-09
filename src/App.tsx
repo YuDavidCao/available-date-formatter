@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { WeekGrid, type Mode } from './components/WeekGrid'
+import { WeekGrid, type Mode, type Selection } from './components/WeekGrid'
 import { copyImage, copyText, download, toPng } from './lib/export'
 import { FORMAT_LABELS, render, toIcs, type FormatId, type FormatOptions } from './lib/format'
 import { DAY_NAMES, localTz, today, tzList, weekStart, type Slot } from './lib/time'
@@ -7,6 +7,7 @@ import { decodeState, encodeState, shareUrl } from './lib/url'
 
 const FORMAT_IDS = Object.keys(FORMAT_LABELS) as FormatId[]
 const ZONES = tzList()
+const HISTORY_MAX = 50
 
 const initial = decodeState(window.location.hash.slice(1))
 
@@ -23,6 +24,7 @@ export default function App() {
   const [offset, setOffset] = useState(0)
   const [startDow, setStartDow] = useState(1)
   const [toast, setToast] = useState('')
+  const [history, setHistory] = useState<Selection[]>([])
 
   const options: FormatOptions = { tz, hour12, showTz, relativeDays, longDates }
 
@@ -42,6 +44,32 @@ export default function App() {
     setToast(message)
     window.setTimeout(() => setToast(''), 2000)
   }
+
+  // Every edit routes through here, so undo only has to know about one path.
+  const apply = (next: Selection) => {
+    setHistory((past) => [...past.slice(-HISTORY_MAX + 1), { slots, busy }])
+    setSlots(next.slots)
+    setBusy(next.busy)
+  }
+
+  const undo = () => {
+    const previous = history[history.length - 1]
+    if (!previous) return
+    setHistory((past) => past.slice(0, -1))
+    setSlots(previous.slots)
+    setBusy(previous.busy)
+    flash('Undone')
+  }
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key !== 'z') return
+      e.preventDefault()
+      undo()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
 
   const guard = (action: () => void | Promise<void>) => async () => {
     if (slots.length === 0 && busy.length === 0) return flash('Pick some times first')
@@ -105,14 +133,10 @@ export default function App() {
               {slots.length} free
               {busy.length > 0 && ` · ${busy.length} busy`}
             </span>
-            <NavButton
-              onClick={() => {
-                setSlots([])
-                setBusy([])
-              }}
-            >
-              Clear all
+            <NavButton disabled={history.length === 0} onClick={undo}>
+              Undo
             </NavButton>
+            <NavButton onClick={() => apply({ slots: [], busy: [] })}>Clear all</NavButton>
           </div>
         </div>
 
@@ -123,10 +147,7 @@ export default function App() {
           mode={mode}
           tz={tz}
           hour12={hour12}
-          onChange={(next) => {
-            setSlots(next.slots)
-            setBusy(next.busy)
-          }}
+          onChange={apply}
         />
       </section>
 
@@ -198,12 +219,21 @@ export default function App() {
   )
 }
 
-function NavButton({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+function NavButton({
+  children,
+  onClick,
+  disabled,
+}: {
+  children: React.ReactNode
+  onClick: () => void
+  disabled?: boolean
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 transition-colors hover:border-slate-500 hover:text-white"
+      disabled={disabled}
+      className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 transition-colors hover:border-slate-500 hover:text-white disabled:pointer-events-none disabled:opacity-40"
     >
       {children}
     </button>
