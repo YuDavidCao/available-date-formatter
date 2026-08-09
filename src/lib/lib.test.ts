@@ -88,6 +88,24 @@ test('output stays in date order, including across weeks', () => {
   ])
 })
 
+test('a second timezone rides along in parentheses', () => {
+  const dual = { ...options, theirTz: 'America/Los_Angeles' }
+  expect(render(slots, 'plain', dual)).toBe('Tue, Aug 11 — 9–11 AM (6–8 AM), 2–3:30 PM (11 AM–12:30 PM)')
+  // Same zone on both sides is not worth repeating.
+  expect(render(slots, 'plain', { ...options, theirTz: NY })).toBe(render(slots, 'plain', options))
+})
+
+test('the second timezone names its weekday when the date differs there', () => {
+  const tokyo = { ...options, theirTz: 'Asia/Tokyo' }
+  // 9 PM Tuesday in New York is already 10 AM Wednesday in Tokyo.
+  const evening: Slot[] = [{ s: wallToUtc(day, 21 * 60, NY), e: wallToUtc(day, 22 * 60, NY) }]
+  expect(render(evening, 'plain', tokyo)).toBe('Tue, Aug 11 — 9–10 PM (Wed 10–11 AM)')
+
+  // A range containing midnight in Tokyo needs a weekday on both ends.
+  const straddling: Slot[] = [{ s: wallToUtc(day, 10 * 60, NY), e: wallToUtc(day, 12 * 60, NY) }]
+  expect(render(straddling, 'plain', tokyo)).toBe('Tue, Aug 11 — 10 AM–12 PM (Tue 11 PM–Wed 1 AM)')
+})
+
 test('email format drops the redundant meridiem inside a range', () => {
   const text = render(slots, 'email', options)
   expect(text).toContain('Tue, Aug 11 — 9–11 AM, 2–3:30 PM')

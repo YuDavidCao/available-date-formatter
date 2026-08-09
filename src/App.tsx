@@ -21,12 +21,13 @@ export default function App() {
   const [showTz, setShowTz] = useState(true)
   const [relativeDays, setRelativeDays] = useState(false)
   const [longDates, setLongDates] = useState(false)
+  const [theirTz, setTheirTz] = useState('')
   const [offset, setOffset] = useState(0)
   const [startDow, setStartDow] = useState(1)
   const [toast, setToast] = useState('')
   const [history, setHistory] = useState<Selection[]>([])
 
-  const options: FormatOptions = { tz, hour12, showTz, relativeDays, longDates }
+  const options: FormatOptions = { tz, theirTz: theirTz || undefined, hour12, showTz, relativeDays, longDates }
 
   const days = useMemo(() => {
     const start = weekStart(today(tz), startDow) + offset * 7
@@ -182,6 +183,21 @@ export default function App() {
             <Toggle checked={showTz} onChange={setShowTz} label="Include timezone" />
             <Toggle checked={relativeDays} onChange={setRelativeDays} label='Use "Today" / "Tomorrow"' />
             <Toggle checked={longDates} onChange={setLongDates} label="Long day names" />
+            <label className="mt-1 flex flex-col gap-1 text-sm text-slate-300">
+              <span>Also show in their timezone</span>
+              <select
+                value={theirTz}
+                onChange={(e) => setTheirTz(e.target.value)}
+                className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm outline-none focus:border-sky-500"
+              >
+                <option value="">Off</option>
+                {ZONES.map((zone) => (
+                  <option key={zone} value={zone}>
+                    {zone}
+                  </option>
+                ))}
+              </select>
+            </label>
           </fieldset>
 
           <div className="flex flex-col gap-2">

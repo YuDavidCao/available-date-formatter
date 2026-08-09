@@ -4,6 +4,8 @@ export type FormatId = 'email' | 'bullets' | 'compact' | 'markdown' | 'plain' | 
 
 export type FormatOptions = {
   tz: string
+  /** When set, every range also shows on the recipient's clock. */
+  theirTz?: string
   hour12: boolean
   showTz: boolean
   relativeDays: boolean
@@ -34,25 +36,54 @@ export function groupByDay(slots: readonly Slot[], tz: string): DayGroup[] {
     .map(([day, ranges]) => ({ day, ranges }))
 }
 
-function timeParts(utcMs: number, o: FormatOptions) {
+function timeParts(utcMs: number, o: FormatOptions, tz: string) {
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: o.tz,
+    timeZone: tz,
     hour: 'numeric',
     minute: '2-digit',
     hour12: o.hour12,
   }).formatToParts(utcMs)
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? ''
   const clock = o.hour12 && get('minute') === '00' ? get('hour') : `${get('hour')}:${get('minute')}`
-  return { clock, meridiem: get('dayPeriod').toLowerCase().replace(/\s/g, '') }
+  return { clock, meridiem: get('dayPeriod').toUpperCase().replace(/\s/g, '') }
+}
+
+function clockRange(range: Slot, o: FormatOptions, tz: string): string {
+  const a = timeParts(range.s, o, tz)
+  const b = timeParts(range.e, o, tz)
+  if (!o.hour12) return `${a.clock}–${b.clock}`
+  // Drop the redundant meridiem when both ends share it: "9–11 AM".
+  const left = a.meridiem === b.meridiem ? a.clock : `${a.clock} ${a.meridiem}`
+  return `${left}–${b.clock} ${b.meridiem}`
+}
+
+const shortDay = (day: number) =>
+  new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'UTC' }).format(dayDate(day))
+
+/**
+ * The same instant on the recipient's clock. Weekday markers appear only where their
+ * date drifts from ours — 9 PM Tuesday here is already Wednesday in Tokyo.
+ */
+function theirRange(range: Slot, o: FormatOptions, tz: string): string {
+  const ourDay = epochDayIn(range.s, o.tz)
+  const from = epochDayIn(range.s, tz)
+  const to = epochDayIn(range.e - 1, tz) // exclusive end: midnight closes the previous day
+  if (from === to) {
+    const clock = clockRange(range, o, tz)
+    return from === ourDay ? clock : `${shortDay(from)} ${clock}`
+  }
+  // The range straddles midnight on their side, so each end needs its own day.
+  const a = timeParts(range.s, o, tz)
+  const b = timeParts(range.e, o, tz)
+  const suffix = (part: { meridiem: string }) => (o.hour12 ? ` ${part.meridiem}` : '')
+  return `${shortDay(from)} ${a.clock}${suffix(a)}–${shortDay(to)} ${b.clock}${suffix(b)}`
 }
 
 export function formatRange(range: Slot, o: FormatOptions): string {
-  const a = timeParts(range.s, o)
-  const b = timeParts(range.e, o)
-  if (!o.hour12) return `${a.clock}–${b.clock}`
-  // Drop the redundant meridiem when both ends share it: "9–11 AM".
-  const left = a.meridiem === b.meridiem ? a.clock : `${a.clock} ${a.meridiem.toUpperCase()}`
-  return `${left}–${b.clock} ${b.meridiem.toUpperCase()}`
+  const ours = clockRange(range, o, o.tz)
+  if (!o.theirTz || o.theirTz === o.tz) return ours
+  const zone = o.showTz ? ` ${tzAbbr(range.s, o.theirTz)}` : ''
+  return `${ours} (${theirRange(range, o, o.theirTz)}${zone})`
 }
 
 export function formatDay(day: number, o: FormatOptions): string {
