@@ -1,5 +1,7 @@
-import { formatDay, formatRange, groupByDay, type FormatOptions } from './format'
+import { formatDay, formatRange, groupByDay, type DayGroup, type FormatOptions } from './format'
 import { tzAbbr, type Slot } from './time'
+
+type Row = { kind: 'label'; text: string } | { kind: 'day'; group: DayGroup; busy: boolean }
 
 const SCALE = 2
 const PAD = 32
@@ -7,10 +9,20 @@ const ROW = 34
 const WIDTH = 620
 
 /** Renders availability to a PNG blob on a canvas — no DOM screenshotting library needed. */
-export async function toPng(slots: readonly Slot[], o: FormatOptions): Promise<Blob> {
+export async function toPng(
+  slots: readonly Slot[],
+  o: FormatOptions,
+  busy: readonly Slot[] = [],
+): Promise<Blob> {
   const groups = groupByDay(slots, o.tz, o.startDow)
+  const busyGroups = groupByDay(busy, o.tz, o.startDow)
+  const rows: Row[] = [
+    ...groups.map((group): Row => ({ kind: 'day', group, busy: false })),
+    ...(busyGroups.length ? [{ kind: 'label', text: 'Not available' } as Row] : []),
+    ...busyGroups.map((group): Row => ({ kind: 'day', group, busy: true })),
+  ]
   const header = 84
-  const height = header + groups.length * ROW + PAD
+  const height = header + rows.length * ROW + PAD
   const canvas = document.createElement('canvas')
   canvas.width = WIDTH * SCALE
   canvas.height = height * SCALE
@@ -32,19 +44,26 @@ export async function toPng(slots: readonly Slot[], o: FormatOptions): Promise<B
 
   ctx.fillStyle = '#94a3b8'
   ctx.font = font(13)
-  const zone = groups.length ? `${o.tz} · ${tzAbbr(groups[0].ranges[0].s, o.tz)}` : o.tz
+  const anchor = groups[0] ?? busyGroups[0]
+  const zone = anchor ? `${o.tz} · ${tzAbbr(anchor.ranges[0].s, o.tz)}` : o.tz
   ctx.fillText(zone, PAD, 66)
 
-  groups.forEach((group, i) => {
+  rows.forEach((row, i) => {
     const y = header + i * ROW
+    if (row.kind === 'label') {
+      ctx.fillStyle = '#94a3b8'
+      ctx.font = font(12, '600')
+      ctx.fillText(row.text.toUpperCase(), PAD, y + 4)
+      return
+    }
     ctx.fillStyle = i % 2 ? '#0f172a' : '#111c31'
     ctx.fillRect(PAD - 12, y - 18, WIDTH - 2 * PAD + 24, ROW - 6)
     ctx.fillStyle = '#e2e8f0'
     ctx.font = font(15, '600')
-    ctx.fillText(formatDay(group.day, o), PAD, y + 4)
-    ctx.fillStyle = '#7dd3fc'
+    ctx.fillText(formatDay(row.group.day, o), PAD, y + 4)
+    ctx.fillStyle = row.busy ? '#fda4af' : '#7dd3fc'
     ctx.font = font(15)
-    ctx.fillText(group.ranges.map((r) => formatRange(r, o)).join('   ·   '), PAD + 190, y + 4)
+    ctx.fillText(row.group.ranges.map((r) => formatRange(r, o)).join('   ·   '), PAD + 190, y + 4)
   })
 
   return new Promise((resolve, reject) =>

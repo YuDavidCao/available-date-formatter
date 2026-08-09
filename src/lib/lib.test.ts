@@ -52,8 +52,15 @@ test('subtract splits a block when the cut lands inside it', () => {
 
 test('url codec round-trips and stays short', () => {
   const encoded = encodeState(slots, NY)
-  expect(decodeState(encoded)).toEqual({ slots: normalize(slots), tz: NY })
+  expect(decodeState(encoded)).toEqual({ slots: normalize(slots), busy: [], tz: NY })
   expect(encoded.length - NY.length).toBeLessThan(20) // ~3 chars per slot plus the base
+})
+
+test('url codec round-trips busy blocks alongside available ones', () => {
+  const busy: Slot[] = [{ s: wallToUtc(day, 12 * 60, NY), e: wallToUtc(day, 13 * 60, NY) }]
+  expect(decodeState(encodeState(slots, NY, busy))).toEqual({ slots: normalize(slots), busy, tz: NY })
+  // Links written before busy blocks existed still decode.
+  expect(decodeState(encodeState(slots, NY))?.busy).toEqual([])
 })
 
 test('decodeState rejects junk instead of throwing', () => {
@@ -83,6 +90,30 @@ test('output starts on the chosen week start day', () => {
 test('email format drops the redundant meridiem inside a range', () => {
   const text = render(slots, 'email', options)
   expect(text).toContain('Tue, Aug 11 — 9–11 AM, 2–3:30 PM')
+})
+
+test('unavailable blocks read as prose in the email format', () => {
+  const busy: Slot[] = [{ s: wallToUtc(day, 12 * 60, NY), e: wallToUtc(day, 13 * 60, NY) }]
+  expect(render(slots, 'email', options, busy)).toContain("I'm tied up Tue, Aug 11 12–1 PM.")
+  expect(render([], 'email', options, busy)).toBe(
+    "My schedule is fairly open — the only times that won't work are Tue, Aug 11 12–1 PM. Happy to fit in around whatever suits you.",
+  )
+  expect(render(slots, 'email', options)).not.toContain('tied up')
+})
+
+test('unavailable blocks get their own list or column in the other formats', () => {
+  const busy: Slot[] = [{ s: wallToUtc(day, 12 * 60, NY), e: wallToUtc(day, 13 * 60, NY) }]
+  expect(render(slots, 'bullets', options, busy)).toBe(
+    "• Tue, Aug 11 — 9–11 AM, 2–3:30 PM\n\nCan't do:\n• Tue, Aug 11 — 12–1 PM",
+  )
+  expect(render(slots, 'compact', options, busy)).toBe(
+    "Tue, Aug 11 9–11 AM, 2–3:30 PM — can't do Tue, Aug 11 12–1 PM",
+  )
+  expect(render(slots, 'markdown', options, busy)).toBe(
+    "| Day | Available | Can't do |\n| --- | --- | --- |\n| Tue, Aug 11 | 9–11 AM, 2–3:30 PM | 12–1 PM |",
+  )
+  // A day with only busy time still gets a row.
+  expect(render([], 'markdown', options, busy)).toContain('| Tue, Aug 11 | — | 12–1 PM |')
 })
 
 test('weekStart lands on the chosen start day, on or before the given day', () => {

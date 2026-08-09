@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { WeekGrid } from './components/WeekGrid'
+import { WeekGrid, type Mode } from './components/WeekGrid'
 import { copyImage, copyText, download, toPng } from './lib/export'
 import { FORMAT_LABELS, render, toIcs, type FormatId, type FormatOptions } from './lib/format'
 import { DAY_NAMES, localTz, today, tzList, weekStart, type Slot } from './lib/time'
@@ -13,6 +13,8 @@ const initial = decodeState(window.location.hash.slice(1))
 export default function App() {
   const [tz, setTz] = useState(initial?.tz ?? localTz())
   const [slots, setSlots] = useState<Slot[]>(initial?.slots ?? [])
+  const [busy, setBusy] = useState<Slot[]>(initial?.busy ?? [])
+  const [mode, setMode] = useState<Mode>('available')
   const [format, setFormat] = useState<FormatId>('email')
   const [hour12, setHour12] = useState(true)
   const [showTz, setShowTz] = useState(true)
@@ -29,12 +31,12 @@ export default function App() {
     return Array.from({ length: 7 }, (_, i) => start + i)
   }, [tz, offset, startDow])
 
-  const text = render(slots, format, options)
+  const text = render(slots, format, options, busy)
 
   useEffect(() => {
-    const hash = encodeState(slots, tz)
+    const hash = encodeState(slots, tz, busy)
     window.history.replaceState(null, '', hash ? `#${hash}` : window.location.pathname)
-  }, [slots, tz])
+  }, [slots, busy, tz])
 
   const flash = (message: string) => {
     setToast(message)
@@ -42,7 +44,7 @@ export default function App() {
   }
 
   const guard = (action: () => void | Promise<void>) => async () => {
-    if (slots.length === 0) return flash('Pick some times first')
+    if (slots.length === 0 && busy.length === 0) return flash('Pick some times first')
     await action()
   }
 
@@ -51,7 +53,7 @@ export default function App() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Available Date Formatter</h1>
-          <p className="text-sm text-slate-400">Drag across the calendar to mark when you're free, then copy it however you need it.</p>
+          <p className="text-sm text-slate-400">Drag across the calendar to mark when you're free — or switch to Unavailable to block time off — then copy it however you need it.</p>
         </div>
         <label className="flex items-center gap-2 text-sm">
           <span className="text-slate-400">Timezone</span>
@@ -91,12 +93,41 @@ export default function App() {
             </label>
           </div>
           <div className="flex items-center gap-2 text-sm text-slate-400">
-            <span>{slots.length} block{slots.length === 1 ? '' : 's'}</span>
-            <NavButton onClick={() => setSlots([])}>Clear all</NavButton>
+            <div className="flex overflow-hidden rounded-lg border border-slate-700">
+              <ModeButton active={mode === 'available'} onClick={() => setMode('available')} tone="sky">
+                Available
+              </ModeButton>
+              <ModeButton active={mode === 'busy'} onClick={() => setMode('busy')} tone="rose">
+                Unavailable
+              </ModeButton>
+            </div>
+            <span>
+              {slots.length} free
+              {busy.length > 0 && ` · ${busy.length} busy`}
+            </span>
+            <NavButton
+              onClick={() => {
+                setSlots([])
+                setBusy([])
+              }}
+            >
+              Clear all
+            </NavButton>
           </div>
         </div>
 
-        <WeekGrid days={days} slots={slots} tz={tz} hour12={hour12} onChange={setSlots} />
+        <WeekGrid
+          days={days}
+          slots={slots}
+          busy={busy}
+          mode={mode}
+          tz={tz}
+          hour12={hour12}
+          onChange={(next) => {
+            setSlots(next.slots)
+            setBusy(next.busy)
+          }}
+        />
       </section>
 
       <section className="grid gap-6 lg:grid-cols-[1fr_320px]">
@@ -138,16 +169,16 @@ export default function App() {
             </Action>
             <Action
               onClick={guard(async () => {
-                const how = await copyImage(toPng(slots, options), 'availability.png')
+                const how = await copyImage(toPng(slots, options, busy), 'availability.png')
                 flash(how === 'copied' ? 'PNG copied' : 'PNG downloaded')
               })}
             >
               Copy as PNG
             </Action>
-            <Action onClick={guard(async () => { await copyText(shareUrl(slots, tz)); flash('Share link copied') })}>
+            <Action onClick={guard(async () => { await copyText(shareUrl(slots, tz, busy)); flash('Share link copied') })}>
               Copy share link
             </Action>
-            <Action onClick={guard(() => download(toIcs(slots), 'availability.ics', 'text/calendar'))}>
+            <Action onClick={guard(() => download(toIcs(slots, busy), 'availability.ics', 'text/calendar'))}>
               Download .ics
             </Action>
           </div>
@@ -173,6 +204,32 @@ function NavButton({ children, onClick }: { children: React.ReactNode; onClick: 
       type="button"
       onClick={onClick}
       className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 transition-colors hover:border-slate-500 hover:text-white"
+    >
+      {children}
+    </button>
+  )
+}
+
+function ModeButton({
+  children,
+  active,
+  onClick,
+  tone,
+}: {
+  children: React.ReactNode
+  active: boolean
+  onClick: () => void
+  tone: 'sky' | 'rose'
+}) {
+  const on = tone === 'sky' ? 'bg-sky-500 text-slate-950' : 'bg-rose-500 text-slate-950'
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+        active ? on : 'text-slate-300 hover:bg-slate-800'
+      }`}
     >
       {children}
     </button>

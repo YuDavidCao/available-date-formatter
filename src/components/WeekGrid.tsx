@@ -9,12 +9,18 @@ const PX_PER_MIN = HOUR_PX / 60
 
 type Drag = { day: number; anchor: number; cursor: number }
 
+export type Mode = 'available' | 'busy'
+
+export type Selection = { slots: Slot[]; busy: Slot[] }
+
 type Props = {
   days: number[]
   slots: Slot[]
+  busy: Slot[]
+  mode: Mode
   tz: string
   hour12: boolean
-  onChange: (slots: Slot[]) => void
+  onChange: (next: Selection) => void
 }
 
 function snap(minutes: number): number {
@@ -27,7 +33,7 @@ function hourLabel(hour: number, hour12: boolean): string {
   return `${h} ${hour < 12 ? 'AM' : 'PM'}`
 }
 
-export function WeekGrid({ days, slots, tz, hour12, onChange }: Props) {
+export function WeekGrid({ days, slots, busy, mode, tz, hour12, onChange }: Props) {
   const bodyRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState<Drag | null>(null)
@@ -42,6 +48,12 @@ export function WeekGrid({ days, slots, tz, hour12, onChange }: Props) {
     for (const group of groupByDay(slots, tz)) map.set(group.day, group.ranges)
     return map
   }, [slots, tz])
+
+  const busyByDay = useMemo(() => {
+    const map = new Map<number, Slot[]>()
+    for (const group of groupByDay(busy, tz)) map.set(group.day, group.ranges)
+    return map
+  }, [busy, tz])
 
   const pointToCell = (e: React.PointerEvent | PointerEvent) => {
     const body = bodyRef.current
@@ -66,11 +78,17 @@ export function WeekGrid({ days, slots, tz, hour12, onChange }: Props) {
     if (cell) setDrag({ ...drag, cursor: cell.minutes })
   }
 
+  // Painting one kind carves the block out of the other — a time cannot be both.
   const commit = () => {
     if (!drag) return
     const from = Math.min(drag.anchor, drag.cursor)
     const to = Math.max(drag.anchor, drag.cursor, from + SNAP_MIN)
-    onChange(normalize([...slots, { s: wallToUtc(drag.day, from, tz), e: wallToUtc(drag.day, to, tz) }]))
+    const block = { s: wallToUtc(drag.day, from, tz), e: wallToUtc(drag.day, to, tz) }
+    onChange(
+      mode === 'busy'
+        ? { slots: subtract(slots, block), busy: normalize([...busy, block]) }
+        : { slots: normalize([...slots, block]), busy: subtract(busy, block) },
+    )
     setDrag(null)
   }
 
@@ -139,31 +157,47 @@ export function WeekGrid({ days, slots, tz, hour12, onChange }: Props) {
             <div className="absolute inset-0 flex">
               {days.map((day) => (
                 <div key={day} className="relative flex-1 border-l border-slate-800/70">
-                  {(byDay.get(day) ?? []).map((range) => {
-                    const top = utcToMinutes(range.s, day, tz) * PX_PER_MIN
-                    const height = (utcToMinutes(range.e, day, tz) - utcToMinutes(range.s, day, tz)) * PX_PER_MIN
-                    return (
-                      <div
-                        key={range.s}
-                        className="group absolute inset-x-1 overflow-hidden rounded-lg bg-sky-500/25 ring-1 ring-sky-400/60 transition-colors hover:bg-sky-500/35"
-                        style={{ top, height }}
-                      >
-                        <button
-                          type="button"
-                          aria-label="Remove this time block"
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={() => onChange(subtract(slots, range))}
-                          className="absolute top-0.5 right-0.5 flex h-5 w-5 items-center justify-center rounded text-xs text-sky-100 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-sky-500/40 focus:opacity-100"
+                  {[
+                    { ranges: byDay.get(day) ?? [], busy: false },
+                    { ranges: busyByDay.get(day) ?? [], busy: true },
+                  ].flatMap(({ ranges, busy: isBusy }) =>
+                    ranges.map((range) => {
+                      const top = utcToMinutes(range.s, day, tz) * PX_PER_MIN
+                      const height = (utcToMinutes(range.e, day, tz) - utcToMinutes(range.s, day, tz)) * PX_PER_MIN
+                      const style = isBusy
+                        ? 'bg-rose-500/25 ring-rose-400/60 hover:bg-rose-500/35'
+                        : 'bg-sky-500/25 ring-sky-400/60 hover:bg-sky-500/35'
+                      return (
+                        <div
+                          key={`${isBusy}-${range.s}`}
+                          className={`group absolute inset-x-1 overflow-hidden rounded-lg ring-1 transition-colors ${style}`}
+                          style={{ top, height }}
                         >
-                          ×
-                        </button>
-                      </div>
-                    )
-                  })}
+                          <button
+                            type="button"
+                            aria-label={isBusy ? 'Remove this unavailable block' : 'Remove this time block'}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={() =>
+                              onChange(
+                                isBusy
+                                  ? { slots, busy: subtract(busy, range) }
+                                  : { slots: subtract(slots, range), busy },
+                              )
+                            }
+                            className="absolute top-0.5 right-0.5 flex h-5 w-5 items-center justify-center rounded text-xs text-slate-100 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-slate-100/20 focus:opacity-100"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      )
+                    }),
+                  )}
 
                   {preview?.day === day && (
                     <div
-                      className="pointer-events-none absolute inset-x-1 rounded-lg bg-sky-400/40 ring-2 ring-sky-300"
+                      className={`pointer-events-none absolute inset-x-1 rounded-lg ${
+                        mode === 'busy' ? 'bg-rose-400/40 ring-2 ring-rose-300' : 'bg-sky-400/40 ring-2 ring-sky-300'
+                      }`}
                       style={{ top: preview.top, height: preview.height }}
                     >
                       <span className="px-1.5 text-[11px] font-medium text-white">{preview.label}</span>

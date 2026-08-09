@@ -35,7 +35,7 @@ function readVarint(src: string, i: number): [value: number, next: number] {
   }
 }
 
-export function encodeState(slots: readonly Slot[], tz: string): string {
+function pack(slots: readonly Slot[]): string {
   const merged = normalize(slots)
   if (merged.length === 0) return ''
   const base = Math.round(merged[0].s / UNIT_MS)
@@ -47,31 +47,45 @@ export function encodeState(slots: readonly Slot[], tz: string): string {
     body += writeVarint(start - cursor) + writeVarint(Math.max(1, end - start))
     cursor = end
   }
-  return `${VERSION}${writeVarint(base)}${body}~${tz}`
+  return `${writeVarint(base)}${body}`
 }
 
-export function decodeState(hash: string): { slots: Slot[]; tz?: string } | null {
+function unpack(packed: string): Slot[] {
+  if (!packed) return []
+  let [cursor, i] = readVarint(packed, 0)
+  const slots: Slot[] = []
+  while (i < packed.length) {
+    const [gap, afterGap] = readVarint(packed, i)
+    const [len, afterLen] = readVarint(packed, afterGap)
+    const start = cursor + gap
+    slots.push({ s: start * UNIT_MS, e: (start + len) * UNIT_MS })
+    cursor = start + len
+    i = afterLen
+  }
+  return normalize(slots)
+}
+
+/** Busy blocks ride along after a `!`, so links written before they existed still decode. */
+export function encodeState(slots: readonly Slot[], tz: string, busy: readonly Slot[] = []): string {
+  const free = pack(slots)
+  const blocked = pack(busy)
+  if (!free && !blocked) return ''
+  return `${VERSION}${free}${blocked ? `!${blocked}` : ''}~${tz}`
+}
+
+export function decodeState(hash: string): { slots: Slot[]; busy: Slot[]; tz?: string } | null {
   if (!hash || hash[0] !== VERSION) return null
   try {
-    const [packed, tz] = hash.slice(1).split('~')
-    let [cursor, i] = readVarint(packed, 0)
-    const slots: Slot[] = []
-    while (i < packed.length) {
-      const [gap, afterGap] = readVarint(packed, i)
-      const [len, afterLen] = readVarint(packed, afterGap)
-      const start = cursor + gap
-      slots.push({ s: start * UNIT_MS, e: (start + len) * UNIT_MS })
-      cursor = start + len
-      i = afterLen
-    }
-    return { slots: normalize(slots), tz: tz || undefined }
+    const [payload, tz] = hash.slice(1).split('~')
+    const [free, blocked = ''] = payload.split('!')
+    return { slots: unpack(free), busy: unpack(blocked), tz: tz || undefined }
   } catch {
     return null
   }
 }
 
-export function shareUrl(slots: readonly Slot[], tz: string): string {
-  const encoded = encodeState(slots, tz)
+export function shareUrl(slots: readonly Slot[], tz: string, busy: readonly Slot[] = []): string {
+  const encoded = encodeState(slots, tz, busy)
   const { origin, pathname } = window.location
   return encoded ? `${origin}${pathname}#${encoded}` : `${origin}${pathname}`
 }
