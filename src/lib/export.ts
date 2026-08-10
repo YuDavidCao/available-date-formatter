@@ -1,4 +1,5 @@
 import { formatDay, formatRange, groupByDay, type DayGroup, type FormatOptions } from './format'
+import { STRINGS } from './i18n'
 import { tzAbbr, type Slot } from './time'
 
 type Row = { kind: 'label'; text: string } | { kind: 'day'; group: DayGroup; busy: boolean }
@@ -20,11 +21,12 @@ export async function toPng(
   o: FormatOptions,
   busy: readonly Slot[] = [],
 ): Promise<Blob> {
+  const t = STRINGS[o.locale]
   const groups = groupByDay(slots, o.tz)
   const busyGroups = groupByDay(busy, o.tz)
   const rows: Row[] = [
     ...groups.map((group): Row => ({ kind: 'day', group, busy: false })),
-    ...(busyGroups.length ? [{ kind: 'label', text: 'Not available' } as Row] : []),
+    ...(busyGroups.length ? [{ kind: 'label', text: t.unavailable } as Row] : []),
     ...busyGroups.map((group): Row => ({ kind: 'day', group, busy: true })),
   ]
   const header = 84
@@ -47,12 +49,12 @@ export async function toPng(
 
   ctx.fillStyle = INK
   ctx.font = serif(23)
-  ctx.fillText('My availability', PAD, 44)
+  ctx.fillText(t.myAvailability, PAD, 44)
 
   ctx.fillStyle = SOFT
   ctx.font = mono(12)
   const anchor = groups[0] ?? busyGroups[0]
-  const zone = anchor ? `${o.tz} · ${tzAbbr(anchor.ranges[0].s, o.tz)}` : o.tz
+  const zone = anchor ? `${o.tz} · ${tzAbbr(anchor.ranges[0].s, o.tz, o.locale)}` : o.tz
   ctx.fillText(zone, PAD, 66)
 
   rows.forEach((row, i) => {

@@ -75,8 +75,8 @@ export function tzList(): string[] {
 }
 
 /** Short zone label, e.g. "PST" or "GMT+8". */
-export function tzAbbr(utcMs: number, tz: string): string {
-  const part = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'short' })
+export function tzAbbr(utcMs: number, tz: string, locale = 'en'): string {
+  const part = new Intl.DateTimeFormat(locale, { timeZone: tz, timeZoneName: 'short' })
     .formatToParts(utcMs)
     .find((p) => p.type === 'timeZoneName')
   return part?.value ?? tz

@@ -34,6 +34,8 @@ function hourLabel(hour: number, hour12: boolean): string {
   return `${hour % 12}${hour < 12 ? 'am' : 'pm'}`
 }
 
+// The grid is the editing surface, not the message: it stays English whatever
+// language the output is rendered in.
 export function WeekGrid({ days, slots, busy, mode, tz, hour12, onChange }: Props) {
   const bodyRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)

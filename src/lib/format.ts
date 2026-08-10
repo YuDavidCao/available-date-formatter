@@ -1,9 +1,12 @@
+import { STRINGS, type LangId } from './i18n'
 import { DAY_MS, dayDate, epochDayIn, tzAbbr, wallToUtc, type Slot } from './time'
 
 export type FormatId = 'email' | 'bullets' | 'compact' | 'markdown' | 'plain' | 'poll'
 
 export type FormatOptions = {
   tz: string
+  /** Language of the rendered message, and the locale every `Intl` call uses. */
+  locale: LangId
   /** When set, every range also shows on the recipient's clock. */
   theirTz?: string
   hour12: boolean
@@ -37,28 +40,42 @@ export function groupByDay(slots: readonly Slot[], tz: string): DayGroup[] {
 }
 
 function timeParts(utcMs: number, o: FormatOptions, tz: string) {
-  const parts = new Intl.DateTimeFormat('en-US', {
+  const parts = new Intl.DateTimeFormat(o.locale, {
     timeZone: tz,
     hour: 'numeric',
     minute: '2-digit',
     hour12: o.hour12,
   }).formatToParts(utcMs)
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? ''
+  const at = (t: string) => parts.findIndex((p) => p.type === t)
+  const period = at('dayPeriod')
   const clock = o.hour12 && get('minute') === '00' ? get('hour') : `${get('hour')}:${get('minute')}`
-  return { clock, meridiem: get('dayPeriod').toUpperCase().replace(/\s/g, '') }
+  return {
+    clock,
+    // Only the (often non-breaking) spaces go: es writes "a. m." lowercase on purpose.
+    meridiem: get('dayPeriod').replace(/\s/g, ''),
+    /** ja/zh write 午前 before the digits, so those pieces cannot be reshuffled. */
+    leading: period >= 0 && period < at('hour'),
+    whole: parts.map((p) => p.value).join(''),
+  }
 }
+
+/** One end of a range, on its own. */
+const stamp = (part: ReturnType<typeof timeParts>, o: FormatOptions) =>
+  part.leading ? part.whole : o.hour12 ? `${part.clock} ${part.meridiem}` : part.clock
 
 function clockRange(range: Slot, o: FormatOptions, tz: string): string {
   const a = timeParts(range.s, o, tz)
   const b = timeParts(range.e, o, tz)
+  if (a.leading) return `${a.whole}–${b.whole}`
   if (!o.hour12) return `${a.clock}–${b.clock}`
   // Drop the redundant meridiem when both ends share it: "9–11 AM".
   const left = a.meridiem === b.meridiem ? a.clock : `${a.clock} ${a.meridiem}`
   return `${left}–${b.clock} ${b.meridiem}`
 }
 
-const shortDay = (day: number) =>
-  new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'UTC' }).format(dayDate(day))
+const shortDay = (day: number, o: FormatOptions) =>
+  new Intl.DateTimeFormat(o.locale, { weekday: 'short', timeZone: 'UTC' }).format(dayDate(day))
 
 /**
  * The same instant on the recipient's clock. Weekday markers appear only where their
@@ -70,29 +87,31 @@ function theirRange(range: Slot, o: FormatOptions, tz: string): string {
   const to = epochDayIn(range.e - 1, tz) // exclusive end: midnight closes the previous day
   if (from === to) {
     const clock = clockRange(range, o, tz)
-    return from === ourDay ? clock : `${shortDay(from)} ${clock}`
+    return from === ourDay ? clock : `${shortDay(from, o)} ${clock}`
   }
   // The range straddles midnight on their side, so each end needs its own day.
   const a = timeParts(range.s, o, tz)
   const b = timeParts(range.e, o, tz)
-  const suffix = (part: { meridiem: string }) => (o.hour12 ? ` ${part.meridiem}` : '')
-  return `${shortDay(from)} ${a.clock}${suffix(a)}–${shortDay(to)} ${b.clock}${suffix(b)}`
+  return `${shortDay(from, o)} ${stamp(a, o)}–${shortDay(to, o)} ${stamp(b, o)}`
 }
 
 export function formatRange(range: Slot, o: FormatOptions): string {
   const ours = clockRange(range, o, o.tz)
   if (!o.theirTz || o.theirTz === o.tz) return ours
-  const zone = o.showTz ? ` ${tzAbbr(range.s, o.theirTz)}` : ''
+  const zone = o.showTz ? ` ${tzAbbr(range.s, o.theirTz, o.locale)}` : ''
   return `${ours} (${theirRange(range, o, o.theirTz)}${zone})`
 }
 
 export function formatDay(day: number, o: FormatOptions): string {
   if (o.relativeDays) {
     const diff = day - epochDayIn(Date.now(), o.tz)
-    if (diff === 0) return 'Today'
-    if (diff === 1) return 'Tomorrow'
+    // "today" / "tomorrow" in any language, straight from Intl.
+    if (diff === 0 || diff === 1) {
+      const word = new Intl.RelativeTimeFormat(o.locale, { numeric: 'auto' }).format(diff, 'day')
+      return word.charAt(0).toUpperCase() + word.slice(1)
+    }
   }
-  return new Intl.DateTimeFormat('en-US', {
+  return new Intl.DateTimeFormat(o.locale, {
     timeZone: 'UTC',
     weekday: o.longDates ? 'long' : 'short',
     month: o.longDates ? 'long' : 'short',
@@ -100,9 +119,10 @@ export function formatDay(day: number, o: FormatOptions): string {
   }).format(dayDate(day))
 }
 
-function zoneSuffix(groups: DayGroup[], o: FormatOptions): string {
+/** The zone label for a whole message, or '' when hidden or there is nothing to label. */
+function zoneAbbr(groups: DayGroup[], o: FormatOptions): string {
   if (!o.showTz || groups.length === 0) return ''
-  return ` ${tzAbbr(groups[0].ranges[0].s, o.tz)}`
+  return tzAbbr(groups[0].ranges[0].s, o.tz, o.locale)
 }
 
 function lines(groups: DayGroup[], o: FormatOptions, bullet: string): string[] {
@@ -129,8 +149,7 @@ const inline = (d: DayGroup, o: FormatOptions) => `${formatDay(d.day, o)} ${dayC
 /** "Tue, Aug 11 12–1 PM and Wed, Aug 12 3–4 PM" — busy time named mid-sentence. */
 function sentenceList(groups: DayGroup[], o: FormatOptions): string {
   const parts = groups.flatMap((g) => g.ranges.map((r) => `${formatDay(g.day, o)} ${formatRange(r, o)}`))
-  if (parts.length < 2) return parts.join('')
-  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+  return new Intl.ListFormat(o.locale, { type: 'conjunction' }).format(parts)
 }
 
 /** Days appearing in either half, in the same order the two halves use. */
@@ -142,23 +161,23 @@ function mergedDays({ free, busy }: Doc): number[] {
 function twoLists({ free, busy }: Doc, o: FormatOptions, bullet: string): string {
   const head = lines(free, o, bullet)
   if (busy.length === 0) return head.join('\n')
-  const tail = ["Can't do:", ...lines(busy, o, bullet)]
+  const tail = [`${STRINGS[o.locale].cantDo}:`, ...lines(busy, o, bullet)]
   return (free.length ? [...head, '', ...tail] : tail).join('\n')
 }
 
 const RENDERERS: Record<FormatId, (d: Doc, o: FormatOptions) => string> = {
   email: ({ free, busy }, o) => {
-    const zone = o.showTz ? ` (all times${zoneSuffix([...free, ...busy], o)})` : ''
-    if (free.length === 0) {
-      return `My schedule is fairly open${zone} — the only times that won't work are ${sentenceList(busy, o)}. Happy to fit in around whatever suits you.`
-    }
+    const t = STRINGS[o.locale]
+    const abbr = zoneAbbr([...free, ...busy], o)
+    const zone = abbr ? t.zoneNote(abbr) : ''
+    if (free.length === 0) return t.emailOnlyBusy(zone, sentenceList(busy, o))
     return [
-      `Here are a few times that work on my end${zone}:`,
+      t.emailIntro(zone),
       '',
       ...lines(free, o, BULLETS.email),
       '',
-      ...(busy.length ? [`I'm tied up ${sentenceList(busy, o)}.`, ''] : []),
-      'Happy to work around your schedule if none of these fit.',
+      ...(busy.length ? [t.emailBusy(sentenceList(busy, o)), ''] : []),
+      t.emailClose,
     ].join('\n')
   },
 
@@ -167,22 +186,29 @@ const RENDERERS: Record<FormatId, (d: Doc, o: FormatOptions) => string> = {
   plain: (d, o) => twoLists(d, o, BULLETS.plain),
 
   compact: ({ free, busy }, o) => {
-    const zone = zoneSuffix([...free, ...busy], o)
+    const abbr = zoneAbbr([...free, ...busy], o)
+    const zone = abbr ? ` ${abbr}` : ''
     const available = free.map((d) => inline(d, o)).join(' · ')
-    const blocked = busy.length ? `can't do ${busy.map((d) => inline(d, o)).join(' · ')}` : ''
+    const blocked = busy.length
+      ? STRINGS[o.locale].cantDoInline(busy.map((d) => inline(d, o)).join(' · '))
+      : ''
     if (!available) return `${blocked.charAt(0).toUpperCase()}${blocked.slice(1)}${zone}`
     return `${available}${zone}${blocked ? ` — ${blocked}` : ''}`
   },
 
   markdown: (doc, o) => {
+    const t = STRINGS[o.locale]
     const { free, busy } = doc
-    const zone = o.showTz ? ` (${zoneSuffix([...free, ...busy], o).trim()})` : ''
+    const abbr = zoneAbbr([...free, ...busy], o)
+    const zone = abbr ? ` (${abbr})` : ''
     const cellsFor = (groups: DayGroup[], day: number) => {
       const group = groups.find((g) => g.day === day)
       return group ? dayCells(group, o) : '—'
     }
     return [
-      busy.length ? `| Day | Available${zone} | Can't do |` : `| Day | Available${zone} |`,
+      busy.length
+        ? `| ${t.day} | ${t.available}${zone} | ${t.cantDo} |`
+        : `| ${t.day} | ${t.available}${zone} |`,
       busy.length ? '| --- | --- | --- |' : '| --- | --- |',
       ...mergedDays(doc).map((day) =>
         busy.length
@@ -192,12 +218,15 @@ const RENDERERS: Record<FormatId, (d: Doc, o: FormatOptions) => string> = {
     ].join('\n')
   },
 
-  poll: ({ free, busy }, o) =>
-    [
+  poll: ({ free, busy }, o) => {
+    const t = STRINGS[o.locale]
+    const abbr = zoneAbbr([...free, ...busy], o)
+    return [
       ...free.flatMap((d) => d.ranges.map((r) => `[ ] ${formatDay(d.day, o)}, ${formatRange(r, o)}`)),
-      ...(busy.length ? ['', `Can't do: ${sentenceList(busy, o)}`] : []),
-      ...(o.showTz ? ['', `(times${zoneSuffix([...free, ...busy], o)})`] : []),
-    ].join('\n'),
+      ...(busy.length ? ['', `${t.cantDo}: ${sentenceList(busy, o)}`] : []),
+      ...(abbr ? ['', t.zoneNote(abbr).trim()] : []),
+    ].join('\n')
+  },
 }
 
 export const FORMAT_LABELS: Record<FormatId, string> = {
@@ -227,10 +256,15 @@ function icsStamp(ms: number): string {
   return new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
 }
 
-export function toIcs(slots: readonly Slot[], busy: readonly Slot[] = []): string {
+export function toIcs(
+  slots: readonly Slot[],
+  busy: readonly Slot[] = [],
+  locale: LangId = 'en',
+): string {
+  const t = STRINGS[locale]
   const events = [
-    ...slots.map((slot) => ({ slot, title: 'Available', transp: 'TRANSPARENT' })),
-    ...busy.map((slot) => ({ slot, title: 'Unavailable', transp: 'OPAQUE' })),
+    ...slots.map((slot) => ({ slot, title: t.available, transp: 'TRANSPARENT' })),
+    ...busy.map((slot) => ({ slot, title: t.unavailable, transp: 'OPAQUE' })),
   ]
   return [
     'BEGIN:VCALENDAR',

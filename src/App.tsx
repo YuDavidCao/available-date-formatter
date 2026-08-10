@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { WeekGrid, type Mode, type Selection } from './components/WeekGrid'
 import { copyImage, copyText, download, toPng } from './lib/export'
 import { FORMAT_LABELS, render, toIcs, type FormatId, type FormatOptions } from './lib/format'
+import { LANGUAGE_NAMES, LANG_IDS, detectLang, type LangId } from './lib/i18n'
 import { DAY_NAMES, dayDate, localTz, today, tzList, weekStart, type Slot } from './lib/time'
 import { decodeState, encodeState, shareUrl } from './lib/url'
 
@@ -30,6 +31,7 @@ function duration(list: Slot[]): string {
 }
 
 export default function App() {
+  const [lang, setLang] = useState<LangId>(detectLang)
   const [tz, setTz] = useState(initial?.tz ?? localTz())
   const [slots, setSlots] = useState<Slot[]>(initial?.slots ?? [])
   const [busy, setBusy] = useState<Slot[]>(initial?.busy ?? [])
@@ -45,7 +47,15 @@ export default function App() {
   const [toast, setToast] = useState('')
   const [history, setHistory] = useState<Selection[]>([])
 
-  const options: FormatOptions = { tz, theirTz: theirTz || undefined, hour12, showTz, relativeDays, longDates }
+  const options: FormatOptions = {
+    tz,
+    locale: lang,
+    theirTz: theirTz || undefined,
+    hour12,
+    showTz,
+    relativeDays,
+    longDates,
+  }
 
   const days = useMemo(() => {
     const start = weekStart(today(tz), startDow) + offset * 7
@@ -232,7 +242,11 @@ export default function App() {
               Copy link
             </Quiet>
             <span aria-hidden>·</span>
-            <Quiet onClick={guard(() => download(toIcs(slots, busy), 'availability.ics', 'text/calendar'))}>
+            <Quiet
+              onClick={guard(() =>
+                download(toIcs(slots, busy, lang), 'availability.ics', 'text/calendar'),
+              )}
+            >
               Download .ics
             </Quiet>
           </div>
@@ -245,6 +259,16 @@ export default function App() {
           <Check checked={showTz} onChange={setShowTz} label="Name the timezone" />
           <Check checked={relativeDays} onChange={setRelativeDays} label="Today / Tomorrow" />
           <Check checked={longDates} onChange={setLongDates} label="Full day names" />
+          <label className="flex items-baseline gap-2 font-mono text-[11px] text-soft">
+            <span>Message language</span>
+            <Select value={lang} onChange={(v) => setLang(v as LangId)}>
+              {LANG_IDS.map((id) => (
+                <option key={id} value={id}>
+                  {LANGUAGE_NAMES[id]}
+                </option>
+              ))}
+            </Select>
+          </label>
           <label className="flex items-baseline gap-2 font-mono text-[11px] text-soft">
             <span>Week starts</span>
             <Select value={String(startDow)} onChange={(v) => setStartDow(Number(v))}>

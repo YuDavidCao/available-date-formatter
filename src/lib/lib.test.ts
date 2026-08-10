@@ -6,6 +6,7 @@ import { decodeState, encodeState } from './url'
 const NY = 'America/New_York'
 const options: FormatOptions = {
   tz: NY,
+  locale: 'en',
   hour12: true,
   showTz: false,
   relativeDays: false,
@@ -133,6 +134,22 @@ test('unavailable blocks get their own list or column in the other formats', () 
   )
   // A day with only busy time still gets a row.
   expect(render([], 'markdown', options, busy)).toContain('| Tue, Aug 11 | — | 12–1 PM |')
+})
+
+test('the chosen language reaches dates, times and prose alike', () => {
+  const busy: Slot[] = [{ s: wallToUtc(day, 12 * 60, NY), e: wallToUtc(day, 13 * 60, NY) }]
+
+  expect(render(slots, 'plain', { ...options, locale: 'es' })).toBe(
+    'mar, 11 ago — 9–11 a.m., 2–3:30 p.m.',
+  )
+  expect(render(slots, 'bullets', { ...options, locale: 'de' }, busy)).toContain('Belegt:')
+  expect(render(slots, 'markdown', { ...options, locale: 'fr' }, busy)).toContain(
+    '| Jour | Libre | Occupé |',
+  )
+  // ja writes 午前 before the digits, so the meridiem cannot be hoisted out of the range.
+  expect(render(slots, 'plain', { ...options, locale: 'ja' })).toBe(
+    '8月11日(火) — 午前9:00–午前11:00, 午後2:00–午後3:30',
+  )
 })
 
 test('weekStart lands on the chosen start day, on or before the given day', () => {
