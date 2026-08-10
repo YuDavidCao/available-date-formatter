@@ -4,8 +4,7 @@ import react from '@astrojs/react'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
-  site: 'https://yudavidcao.github.io',
-  base: '/available-date-formatter/',
+  site: 'https://available-date-formatter.com',
   integrations: [react()],
   vite: { plugins: [tailwindcss()] },
 })
