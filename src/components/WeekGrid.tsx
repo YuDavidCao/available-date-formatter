@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { groupByDay } from '../lib/format'
-import { dayDate, normalize, subtract, today, utcToMinutes, wallToUtc, type Slot } from '../lib/time'
+import { dayLabel, paint, type Mode, type Selection } from '../lib/selection'
+import { dayDate, subtract, today, utcToMinutes, wallToUtc, type Slot } from '../lib/time'
 
 const SNAP_MIN = 15
 const HOUR_PX = 46
@@ -9,10 +10,6 @@ const PX_PER_MIN = HOUR_PX / 60
 const LABEL_MIN_PX = 30
 
 type Drag = { day: number; anchor: number; cursor: number }
-
-export type Mode = 'available' | 'busy'
-
-export type Selection = { slots: Slot[]; busy: Slot[] }
 
 type Props = {
   days: number[]
@@ -89,17 +86,12 @@ export function WeekGrid({ days, slots, busy, mode, tz, hour12, onChange }: Prop
     if (cell) setDrag({ ...drag, cursor: cell.minutes })
   }
 
-  // Painting one kind carves the block out of the other — a time cannot be both.
   const commit = () => {
     if (!drag) return
     const from = Math.min(drag.anchor, drag.cursor)
     const to = Math.max(drag.anchor, drag.cursor, from + SNAP_MIN)
     const block = { s: wallToUtc(drag.day, from, tz), e: wallToUtc(drag.day, to, tz) }
-    onChange(
-      mode === 'busy'
-        ? { slots: subtract(slots, block), busy: normalize([...busy, block]) }
-        : { slots: normalize([...slots, block]), busy: subtract(busy, block) },
-    )
+    onChange(paint({ slots, busy }, block, mode))
     setDrag(null)
   }
 
@@ -136,7 +128,14 @@ export function WeekGrid({ days, slots, busy, mode, tz, hour12, onChange }: Prop
         })}
       </div>
 
-      <div ref={scrollRef} className="h-[400px] overflow-y-auto">
+      {/* Focusable so the 24-hour scroll region can be reached by keyboard, not just by pointer. */}
+      <div
+        ref={scrollRef}
+        tabIndex={0}
+        role="group"
+        aria-label="Week grid, midnight to midnight. Drag to mark times, or use the form below the grid."
+        className="h-[400px] overflow-y-auto"
+      >
         <div className="flex">
           <div className="w-12 shrink-0 select-none">
             {Array.from({ length: 24 }, (_, hour) => (
@@ -199,7 +198,7 @@ export function WeekGrid({ days, slots, busy, mode, tz, hour12, onChange }: Prop
                           )}
                           <button
                             type="button"
-                            aria-label={`Remove ${isBusy ? 'unavailable' : 'available'} block ${clock(range.s)} to ${clock(range.e)}`}
+                            aria-label={`Remove ${isBusy ? 'unavailable' : 'available'} block, ${dayLabel(day)} ${clock(range.s)} to ${clock(range.e)}`}
                             onPointerDown={(e) => e.stopPropagation()}
                             onClick={() =>
                               onChange(

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { WeekGrid, type Mode, type Selection } from './components/WeekGrid'
+import { WeekGrid } from './components/WeekGrid'
+import { dayLabel, paint, type Mode, type Selection } from './lib/selection'
 import { copyImage, copyText, download, toPng } from './lib/export'
 import { FORMAT_LABELS, render, toIcs, type FormatId, type FormatOptions } from './lib/format'
 import { LANGUAGE_NAMES, LANG_IDS, detectLang, type LangId } from './lib/i18n'
-import { DAY_NAMES, dayDate, localTz, today, tzList, weekStart, type Slot } from './lib/time'
+import { DAY_NAMES, dayDate, localTz, today, tzList, wallToUtc, weekStart, type Slot } from './lib/time'
 import { decodeState, encodeState, shareUrl } from './lib/url'
 
 const FORMAT_IDS = Object.keys(FORMAT_LABELS) as FormatId[]
@@ -125,13 +126,19 @@ export default function App() {
         </label>
       </header>
 
-      <section className="mt-10">
+      <main>
+      <section className="mt-10" aria-labelledby="grid-heading">
+        <h2 id="grid-heading" className="sr-only">
+          Mark your availability
+        </h2>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
           <div className="flex items-center gap-1">
             <Step label="Previous week" onClick={() => setOffset(offset - 1)}>
               ←
             </Step>
-            <span className="min-w-32 text-center font-mono text-[13px] text-ink">{weekSpan(days)}</span>
+            <span aria-live="polite" className="min-w-32 text-center font-mono text-[13px] text-ink">
+              {weekSpan(days)}
+            </span>
             <Step label="Next week" onClick={() => setOffset(offset + 1)}>
               →
             </Step>
@@ -142,7 +149,7 @@ export default function App() {
             )}
           </div>
 
-          <div className="flex items-center gap-5">
+          <div role="group" aria-label="What to mark" className="flex items-center gap-5">
             <Paint active={mode === 'available'} onClick={() => setMode('available')} label="Available" />
             <Paint active={mode === 'busy'} onClick={() => setMode('busy')} label="Unavailable" busy />
           </div>
@@ -156,6 +163,17 @@ export default function App() {
           tz={tz}
           hour12={hour12}
           onChange={apply}
+        />
+
+        <AddBlock
+          days={days}
+          tz={tz}
+          mode={mode}
+          onAdd={(block) => {
+            apply(paint({ slots, busy }, block, mode))
+            flash(`Marked ${mode === 'busy' ? 'unavailable' : 'available'}`)
+          }}
+          onReject={flash}
         />
 
         <div className="mt-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 font-mono text-[11px] text-soft">
@@ -175,8 +193,15 @@ export default function App() {
         </div>
       </section>
 
-      <section className="mt-14">
-        <div className="mb-6 flex flex-wrap gap-x-5 gap-y-2 border-b border-rule pb-2.5">
+      <section className="mt-14" aria-labelledby="message-heading">
+        <h2 id="message-heading" className="sr-only">
+          Your message
+        </h2>
+        <div
+          role="group"
+          aria-label="Message format"
+          className="mb-6 flex flex-wrap gap-x-5 gap-y-2 border-b border-rule pb-2.5"
+        >
           {FORMAT_IDS.map((id) => (
             <button
               key={id}
@@ -253,7 +278,10 @@ export default function App() {
         </div>
       </section>
 
-      <section className="mt-14 border-t border-rule pt-6">
+      <section className="mt-14 border-t border-rule pt-6" aria-labelledby="options-heading">
+        <h2 id="options-heading" className="sr-only">
+          Options
+        </h2>
         <div className="flex flex-wrap items-baseline gap-x-8 gap-y-4">
           <Check checked={hour12} onChange={setHour12} label="12-hour clock" />
           <Check checked={showTz} onChange={setShowTz} label="Name the timezone" />
@@ -295,16 +323,95 @@ export default function App() {
           Times live in the link itself. Nothing is uploaded.
         </p>
       </section>
+      </main>
 
-      {toast && (
-        <div
-          role="status"
-          className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-ink px-4 py-2 font-mono text-[12px] text-paper"
-        >
-          {toast}
-        </div>
-      )}
+      {/* Mounted always, so the live region exists before the first message lands in it. */}
+      <div role="status" aria-live="polite" className="fixed bottom-8 left-1/2 -translate-x-1/2">
+        {toast && (
+          <span className="block bg-ink px-4 py-2 font-mono text-[12px] text-paper">{toast}</span>
+        )}
+      </div>
     </div>
+  )
+}
+
+const toMinutes = (value: string): number => {
+  const [hours, mins] = value.split(':').map(Number)
+  return hours * 60 + mins
+}
+
+/** The grid needs a pointer. This does the same job with a keyboard. */
+function AddBlock({
+  days,
+  tz,
+  mode,
+  onAdd,
+  onReject,
+}: {
+  days: number[]
+  tz: string
+  mode: Mode
+  onAdd: (block: Slot) => void
+  onReject: (message: string) => void
+}) {
+  const [index, setIndex] = useState(0)
+  const [from, setFrom] = useState('09:00')
+  const [to, setTo] = useState('17:00')
+
+  // Days shift as the week is paged, so hold a column index rather than a date.
+  const day = days[Math.min(index, days.length - 1)]
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault()
+    const [start, end] = [toMinutes(from), toMinutes(to)]
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return onReject('Enter both times')
+    if (end <= start) return onReject('End time must be after the start time')
+    onAdd({ s: wallToUtc(day, start, tz), e: wallToUtc(day, end, tz) })
+  }
+
+  return (
+    <form
+      onSubmit={submit}
+      className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-2 font-mono text-[11px] text-soft"
+    >
+      <span>Or type it</span>
+      <label className="flex items-baseline gap-1.5">
+        <span className="sr-only">Day</span>
+        <Select value={String(index)} onChange={(v) => setIndex(Number(v))}>
+          {days.map((value, i) => (
+            <option key={value} value={i}>
+              {dayLabel(value)}
+            </option>
+          ))}
+        </Select>
+      </label>
+      <label className="flex items-baseline gap-1.5">
+        <span>from</span>
+        <Time value={from} onChange={setFrom} />
+      </label>
+      <label className="flex items-baseline gap-1.5">
+        <span>to</span>
+        <Time value={to} onChange={setTo} />
+      </label>
+      <button
+        type="submit"
+        className="border-b border-rule pb-0.5 text-[12px] text-ink transition-colors hover:border-ink"
+      >
+        Mark {mode === 'busy' ? 'unavailable' : 'available'}
+      </button>
+    </form>
+  )
+}
+
+function Time({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <input
+      type="time"
+      step={900}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="border-b border-rule bg-transparent pb-0.5 font-mono text-[12px] text-ink transition-colors hover:border-ink"
+    />
   )
 }
 
@@ -323,7 +430,7 @@ function Select({
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className={`border-b border-rule bg-transparent pb-0.5 font-mono text-[12px] text-ink transition-colors hover:border-ink focus:border-mark focus:outline-none ${className}`}
+      className={`border-b border-rule bg-transparent pb-0.5 font-mono text-[12px] text-ink transition-colors hover:border-ink ${className}`}
     >
       {children}
     </select>

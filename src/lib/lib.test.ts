@@ -2,6 +2,7 @@ import { expect, test } from 'vitest'
 import { render, groupByDay, type FormatOptions } from './format'
 import { normalize, subtract, utcToMinutes, wallToUtc, weekStart, type Slot } from './time'
 import { decodeState, encodeState } from './url'
+import { paint } from './selection'
 
 const NY = 'America/New_York'
 const options: FormatOptions = {
@@ -19,6 +20,23 @@ const slots: Slot[] = [
   { s: wallToUtc(day, 9 * 60, NY), e: wallToUtc(day, 11 * 60, NY) },
   { s: wallToUtc(day, 14 * 60, NY), e: wallToUtc(day, 15 * 60 + 30, NY) },
 ]
+
+// Both the drag surface and the keyboard form commit through paint(), so a time
+// can never end up marked as both free and blocked whichever path added it.
+test('paint carves the new block out of the opposite kind', () => {
+  const noon = { s: wallToUtc(day, 10 * 60, NY), e: wallToUtc(day, 15 * 60, NY) }
+
+  const blocked = paint({ slots, busy: [] }, noon, 'busy')
+  expect(blocked.busy).toEqual([noon])
+  expect(blocked.slots).toEqual([
+    { s: slots[0].s, e: wallToUtc(day, 10 * 60, NY) },
+    { s: wallToUtc(day, 15 * 60, NY), e: slots[1].e },
+  ])
+
+  const freed = paint({ slots: [], busy: [noon] }, slots[0], 'available')
+  expect(freed.slots).toEqual([slots[0]])
+  expect(freed.busy).toEqual([{ s: slots[0].e, e: noon.e }])
+})
 
 test('wall clock round-trips through a timezone', () => {
   expect(utcToMinutes(slots[0].s, day, NY)).toBe(9 * 60)
