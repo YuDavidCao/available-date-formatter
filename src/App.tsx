@@ -4,12 +4,16 @@ import { dayLabel, paint, type Mode, type Selection } from './lib/selection'
 import { copyImage, copyText, download, toPng } from './lib/export'
 import { FORMAT_LABELS, render, toIcs, type FormatId, type FormatOptions } from './lib/format'
 import { LANGUAGE_NAMES, LANG_IDS, detectLang, type LangId } from './lib/i18n'
-import { DAY_NAMES, dayDate, localTz, today, tzList, wallToUtc, weekStart, type Slot } from './lib/time'
+import { DAY_NAMES, dayDate, localTz, today, tzDiff, tzList, wallToUtc, weekStart, type Slot } from './lib/time'
 import { decodeState, encodeState, shareUrl } from './lib/url'
 
 const FORMAT_IDS = Object.keys(FORMAT_LABELS) as FormatId[]
-const ZONES = tzList()
 const HISTORY_MAX = 50
+
+const zoneLabel = (zone: string) => {
+  const diff = tzDiff(zone)
+  return diff ? `${zone} (${diff})` : zone
+}
 /** Formats that are tables or lists rather than prose, and need aligned type. */
 const STRUCTURED = new Set<FormatId>(['markdown', 'poll'])
 
@@ -117,9 +121,9 @@ export default function App() {
         <label className="flex items-baseline gap-2 font-mono text-[11px] text-soft">
           <span>Your timezone</span>
           <Select value={tz} onChange={setTz} className="max-w-52">
-            {ZONES.map((zone) => (
+            {tzList(tz).map((zone) => (
               <option key={zone} value={zone}>
-                {zone}
+                {zoneLabel(zone)}
               </option>
             ))}
           </Select>
@@ -311,9 +315,9 @@ export default function App() {
             <span>Also show in</span>
             <Select value={theirTz} onChange={setTheirTz} className="max-w-52">
               <option value="">Off</option>
-              {ZONES.map((zone) => (
+              {tzList(theirTz).map((zone) => (
                 <option key={zone} value={zone}>
-                  {zone}
+                  {zoneLabel(zone)}
                 </option>
               ))}
             </Select>

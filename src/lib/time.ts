@@ -66,12 +66,65 @@ export function localTz(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 }
 
-export function tzList(): string[] {
-  const supported = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] })
-    .supportedValuesOf
-  const list = supported ? supported('timeZone') : ['UTC']
-  const local = localTz()
-  return list.includes(local) ? [local, ...list.filter((z) => z !== local)] : [local, ...list]
+// ponytail: hand-picked common zones, roughly west to east; add more if someone asks
+const COMMON_ZONES = [
+  'Pacific/Honolulu',
+  'America/Anchorage',
+  'America/Los_Angeles',
+  'America/Denver',
+  'America/Phoenix',
+  'America/Chicago',
+  'America/New_York',
+  'America/Toronto',
+  'America/Mexico_City',
+  'America/Bogota',
+  'America/Sao_Paulo',
+  'America/Argentina/Buenos_Aires',
+  'UTC',
+  'Europe/London',
+  'Europe/Dublin',
+  'Europe/Lisbon',
+  'Europe/Paris',
+  'Europe/Berlin',
+  'Europe/Madrid',
+  'Europe/Amsterdam',
+  'Europe/Stockholm',
+  'Africa/Lagos',
+  'Africa/Johannesburg',
+  'Africa/Cairo',
+  'Europe/Istanbul',
+  'Europe/Moscow',
+  'Asia/Dubai',
+  'Asia/Karachi',
+  'Asia/Kolkata',
+  'Asia/Dhaka',
+  'Asia/Bangkok',
+  'Asia/Jakarta',
+  'Asia/Singapore',
+  'Asia/Shanghai',
+  'Asia/Hong_Kong',
+  'Asia/Taipei',
+  'Asia/Seoul',
+  'Asia/Tokyo',
+  'Australia/Perth',
+  'Australia/Brisbane',
+  'Australia/Sydney',
+  'Pacific/Auckland',
+]
+
+/** Common zones, with the given ones (local, current selection) first if missing. */
+export function tzList(...pinned: string[]): string[] {
+  const extra = [...new Set([localTz(), ...pinned])].filter((z) => z && !COMMON_ZONES.includes(z))
+  return [...extra, ...COMMON_ZONES]
+}
+
+/** Offset of `tz` relative to `base` right now, e.g. "+9h", "-5h30m"; empty when equal. */
+export function tzDiff(tz: string, base = localTz(), at = Date.now()): string {
+  const minutes = Math.round((tzOffset(at, tz) - tzOffset(at, base)) / MIN_MS)
+  if (minutes === 0) return ''
+  const abs = Math.abs(minutes)
+  const rest = abs % 60 ? `${abs % 60}m` : ''
+  return `${minutes < 0 ? '-' : '+'}${Math.floor(abs / 60)}h${rest}`
 }
 
 /** Short zone label, e.g. "PST" or "GMT+8". */

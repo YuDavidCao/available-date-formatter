@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { render, groupByDay, type FormatOptions } from './format'
-import { normalize, subtract, utcToMinutes, wallToUtc, weekStart, type Slot } from './time'
+import { normalize, subtract, tzDiff, tzList, utcToMinutes, wallToUtc, weekStart, type Slot } from './time'
 import { decodeState, encodeState } from './url'
 import { paint } from './selection'
 
@@ -178,4 +178,18 @@ test('weekStart lands on the chosen start day, on or before the given day', () =
     expect(day - start).toBeLessThan(7)
   }
   expect(weekStart(day)).toBe(weekStart(day, 1)) // defaults to Monday
+})
+
+test('timezone list stays short but keeps a zone it does not list', () => {
+  expect(tzList().length).toBeLessThan(60)
+  expect(tzList('Antarctica/Troll')[0]).toBe('Antarctica/Troll')
+  expect(tzList(NY).filter((z) => z === NY)).toHaveLength(1)
+})
+
+test('timezone difference is relative to the base zone', () => {
+  const jan = Date.UTC(2026, 0, 15)
+  expect(tzDiff('Asia/Tokyo', NY, jan)).toBe('+14h')
+  expect(tzDiff('Asia/Kolkata', 'UTC', jan)).toBe('+5h30m')
+  expect(tzDiff('America/Los_Angeles', NY, jan)).toBe('-3h')
+  expect(tzDiff(NY, NY, jan)).toBe('')
 })
